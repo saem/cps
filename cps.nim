@@ -839,10 +839,19 @@ proc cpsXfrm*(T: NimNode, n: NimNode): NimNode =
     result = copy n
   result = workaroundRewrites(result)
 
-macro cps*(T: typed, n: typed): untyped =
+macro cps2*(T: typed, n: typed): untyped =
   # I hate doing stuff inside macros, call the proc to do the work
   when defined(nimdoc):
     result = n
+  else:
+    result = cpsXfrm(T, n)
+
+macro cps*(T: typed; n: typed) =
+  # rewrite for loops
+  case n.kind
+  of nnkProcDef:
+    result = getImplTransformed n[0]
+    result.addPragma newColonExpr(ident"cps2", T)
   else:
     result = cpsXfrm(T, n)
 
