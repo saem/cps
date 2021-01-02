@@ -1,4 +1,3 @@
-import testes
 import cps
 
 type
@@ -10,10 +9,7 @@ proc trampoline(c: C) =
   while c != nil and c.fn != nil:
     c = c.fn(c)
 
-testes:
-
-  block:
-    proc loop() {.cps: C.} =
-      for i in 0 .. 3:
-        discard
-    trampoline loop()
+proc loop() {.cps: C.} =
+  for i in 0 .. 3:
+    discard
+trampoline loop()
