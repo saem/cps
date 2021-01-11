@@ -662,7 +662,23 @@ proc setReturn*(e: var Env; rs: NimNode; n: NimNode) =
   # this'll be our signature for the continuation, ie. the first arg
   let via = newIdentDefs(e.first, e.identity, newEmptyNode())
   var pragmas = nnkPragma.newTree bindSym"cpsLift"
-  when true:
+
+  # our result operator might need some special handling;
+  # we'll probably conditionally push/define these separately
+  when false:
+    case cpsResult
+    of "()":
+      e.store.add:
+        nnkPragma.newTree:
+          newColonExpr(ident"experimental", newLit"callOperator")
+    of ".":
+      e.store.add:
+        nnkPragma.newTree:
+          newColonExpr(ident"experimental", newLit"dotOperators")
+    else:
+      discard
+
+  when false:
     # generate `method result(c: env_123): int` whatfer unwrapping the result
     pragmas.add ident"base"
     e.store.add:
@@ -670,7 +686,7 @@ proc setReturn*(e: var Env; rs: NimNode; n: NimNode) =
               body = e.get, params = [n, via],
               pragmas = pragmas)
   else:
-    # generate `proc int(c: env_123): int` whatfer unwrapping the result
+    # generate `proc result(c: env_123): int` whatfer unwrapping the result
     # via a simple type conversion hack such as `continuation.int`
     e.store.add:
       newProc(result, procType = nnkProcDef,
