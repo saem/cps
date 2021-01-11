@@ -661,14 +661,14 @@ proc setReturn*(e: var Env; rs: NimNode; n: NimNode) =
   let result = quoted ident(cpsResult)
   # this'll be our signature for the continuation, ie. the first arg
   let via = newIdentDefs(e.first, e.identity, newEmptyNode())
+  var pragmas = nnkPragma.newTree bindSym"cpsLift"
   when true:
     # generate `method result(c: env_123): int` whatfer unwrapping the result
-    # FIXME: this getter has to get lifted 'cause it's a method but we cannot
-    # currently lift it high enough since methods need to reach top-level
+    pragmas.add ident"base"
     e.store.add:
       newProc(result, procType = nnkMethodDef,
               body = e.get, params = [n, via],
-              pragmas = nnkPragma.newTree bindSym"cpsLift")
+              pragmas = pragmas)
   else:
     # generate `proc int(c: env_123): int` whatfer unwrapping the result
     # via a simple type conversion hack such as `continuation.int`
@@ -676,7 +676,7 @@ proc setReturn*(e: var Env; rs: NimNode; n: NimNode) =
       newProc(result, procType = nnkProcDef,
               body = e.get,            # ie. env_123(c).result_123
               params = [n, via],       # (c: env_123): int
-              pragmas = nnkPragma.newTree bindSym"cpsLift")
+              pragmas = pragmas)
 
 proc rewriteReturn*(e: var Env; n: NimNode): NimNode =
   ## Rewrite a return statement to use our result field.
