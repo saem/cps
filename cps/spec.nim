@@ -20,6 +20,7 @@ const
   cpsExcept* {.booldefine.} = false      ## also stash exceptions
   cpsFn* {.booldefine.} = false          ## multiple fns in continuations
   cpsTrampBooty* {.booldefine.} = false  ## put a tramp in da booty
+  cpsResult* {.strdefine.} = "..."       ## result operator
   comments* = cpsDebug         ## embed comments within the transformation
 
 template cpsLift*() {.pragma.}          ## lift this proc|type

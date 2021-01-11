@@ -510,6 +510,11 @@ iterator localSection*(e: var Env; n: NimNode): Pair =
   finally:
     e.setDirty
 
+template isSpecialEnvField(e: Env; n: NimNode): bool =
+  ## true if the field should get special treatment
+  ## because it's a custom fn, result, or exception
+  n in [e.fn, e.rs, e.ex]
+
 proc newContinuation*(e: Env; via: NimNode;
                       goto: NimNode; defaults = false): NimNode =
   ## else, perform the following alloc...
@@ -517,7 +522,7 @@ proc newContinuation*(e: Env; via: NimNode;
   for field, section in pairs(e):
     # omit special fields in the env that we use for holding
     # custom functions, results, and exceptions, respectively
-    if field notin [e.fn, e.rs, e.ex]:
+    if not e.isSpecialEnvField field:
       let defs = section.last
       if defaults:
         # initialize the field with any default supplied in its declaration
@@ -620,20 +625,24 @@ template withBreak*(s: Scope; body: untyped): untyped {.dirty.} =
   else:
     body
 
-proc setReturn*(e: var Env; n: NimNode) =
-  ## Teach the Env that it should return the provided type.
+template quoted(n: NimNode): NimNode =
+  ## whatfer quoting the result operator below
+  newNimNode(nnkAccQuoted, n).add(n)
+
+proc setReturn*(e: var Env; rs: NimNode; n: NimNode) =
+  ## Teach the Env that it should return the provided result/type.
 
   # forge an identDefs for the result variable to add it to the env
   let defs =
     when false:
       # we use `result: T = default(T)` for completeness
-      newIdentDefs(e.rs, n, newCall(ident"default", n))
+      newIdentDefs(rs, n, newCall(ident"default", n))
     else:
       # we use `result: T` because we are lazy and fearful (but mostly lazy)
-      newIdentDefs(e.rs, n, newEmptyNode())
+      newIdentDefs(rs, n, newEmptyNode())
 
-  # verbose 'cause we want to use n to inherit the line info
-  discard e.set(e.rs, newNimNode(nnkVarSection, n).add defs)
+  # verbose 'cause we want to use rs to inherit the line info
+  discard e.set(e.rs, newNimNode(nnkVarSection, rs).add defs)
 
   when true:
     discard "actually, our dirty tests are currently smart enough 😉"
@@ -648,20 +657,23 @@ proc setReturn*(e: var Env; n: NimNode) =
   #        simple trampoline which, maybe, raises in the event that
   #        the continuation has not fully resolved (ie. fn != nil)
 
-  when false:
+  # compose the result operator; ie. the name of the retrieval proc
+  let result = quoted ident(cpsResult)
+  # this'll be our signature for the continuation, ie. the first arg
+  let via = newIdentDefs(e.first, e.identity, newEmptyNode())
+  when true:
     # generate `method result(c: env_123): int` whatfer unwrapping the result
     # FIXME: this getter has to get lifted 'cause it's a method but we cannot
     # currently lift it high enough since methods need to reach top-level
     e.store.add:
-      newProc(ident"result", procType = nnkMethodDef,
-              body = e.get, params = [n, e.firstDef],
+      newProc(result, procType = nnkMethodDef,
+              body = e.get, params = [n, via],
               pragmas = nnkPragma.newTree bindSym"cpsLift")
   else:
     # generate `proc int(c: env_123): int` whatfer unwrapping the result
     # via a simple type conversion hack such as `continuation.int`
-    let via = newIdentDefs(e.first, e.identity, newEmptyNode())
     e.store.add:
-      newProc(ident n.strVal, procType = nnkProcDef,
+      newProc(result, procType = nnkProcDef,
               body = e.get,            # ie. env_123(c).result_123
               params = [n, via],       # (c: env_123): int
               pragmas = nnkPragma.newTree bindSym"cpsLift")
@@ -676,9 +688,11 @@ proc rewriteReturn*(e: var Env; n: NimNode): NimNode =
       # okay, it's a return: result = ...
       result = newStmtList()
       # ignore the result symbol and create a new assignment
-      result.add newAssignment(e.rs, n.last.last)
+      result.add:
+        newAssignment(e.get, n.last.last)
       # and just issue an empty `return`
-      result.add nnkReturnStmt.newNimNode(n).add newEmptyNode()
+      result.add:
+        nnkReturnStmt.newNimNode(n).add newEmptyNode()
     of nnkEmpty, nnkIdent:
       # this is `return` or `return continuation`, so that's fine...
       result = n
@@ -689,7 +703,7 @@ proc rewriteSymbolsIntoEnvDotField*(e: var Env; n: NimNode): NimNode =
   ## swap symbols for those in the continuation
   result = n
   let child = e.castToChild(e.first)
-  for field, section in pairs(e):
+  for field, section in e.pairs:
     result = result.resym(section[0][0], newDotExpr(child, field))
 
 proc prepProcBody*(e: var Env; n: NimNode): NimNode =

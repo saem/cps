@@ -182,8 +182,14 @@ proc lambdaLift(lifted: NimNode; n: NimNode): NimNode =
   # sort the declarations so that we predeclare types and procs
   sort(flatter, cmpKind)
 
-  # the result is the lifted stuff followed by the original code
-  result = newStmtList(flatter.newStmtList, result)
+  # the result is the lifted stuff followed by the original code;
+  # we're gonna recompose it here to satisfy compiler developers
+  # who will otherwise claim we haven't done all we can to simplify
+  # the structure of the final macro output (ie. omitting comments)
+  result = newStmtList result
+  for n in flatter:
+    if n.kind != nnkCommentStmt:
+      result.insert(result.len - 1, n)
 
 proc makeTail(env: var Env; name: NimNode; n: NimNode): NimNode =
   ## make a tail call and put it in a single statement list;
@@ -687,7 +693,8 @@ proc cpsXfrmProc*(T: NimNode, n: NimNode): NimNode =
 
   # assign the return type if necessary
   if not n.params[0].isEmpty:
-    env.setReturn n.params[0]
+    # inform the env of the result symbol and its type
+    env.setReturn(n.last, n.params[0])
     n.params[0] = newEmptyNode()
 
   ## the preamble for the proc is the space above the user-supplied body.

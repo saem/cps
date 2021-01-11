@@ -547,7 +547,7 @@ testes:
 
       proc foo() {.cps: Cont.} =
         inc r
-        let x = int bar(4)
+        let x = ... bar(4)
         inc r
         check x == 8
 
