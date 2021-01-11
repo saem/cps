@@ -152,11 +152,11 @@ proc isCpsBlock(n: NimNode): bool =
 
 proc cmpKind(a, b: NimNode): int =
   if a.kind == b.kind:
-    if a.kind == nnkProcDef:
+    if a.kind in RoutineNodes:
       result = cmp(a.body.len, b.body.len)  # work around decl bug
     else:
       result = 0
-  elif a.kind == nnkProcDef:
+  elif a.kind in RoutineNodes:
     result = 1
   else:
     result = -1
