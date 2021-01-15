@@ -1,4 +1,4 @@
-import testes
+import balls
 
 import cps
 
@@ -45,7 +45,7 @@ suite "basic testing assumptions":
     trampoline foo()
     check r == 2, "who let the smoke out?"
 
-testes:
+suite "tasteful tests":
 
   var r = 0
 

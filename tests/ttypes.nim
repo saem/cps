@@ -1,6 +1,6 @@
 
 import cps
-import testes
+import balls
 import epoll
 import posix
 
@@ -11,8 +11,8 @@ proc foo(c: C, fd: int16): C {.cpsMagic.} =
   discard
 
 
-testes:
-  
+suite "type tests":
+
   test "int":
     proc test1() {.cps:C} =
       foo(1)
@@ -22,14 +22,14 @@ testes:
     proc test1() {.cps:C} =
       foo(1'i16)
     discard test1()
-  
+
   test "int16()":
     proc test1() {.cps:C} =
       foo(int16(1))
     discard test1()
-  
+
   test ".int16":
     proc test1() {.cps:C} =
       foo(1.int16)
     discard test1()
-  
+

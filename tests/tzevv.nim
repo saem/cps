@@ -1,7 +1,7 @@
 const
   skippy {.booldefine.} = false
 
-import testes
+import balls
 import std/macros
 #import std/unittest
 
@@ -58,7 +58,7 @@ template runCps(body: untyped) =
 
 var r: int
 
-testes:
+suite "suite, suite zevv":
 
   test "nocall":
     expPrims 0: runCps:
@@ -228,4 +228,4 @@ testes:
         break
         prim()
       prim()
-    
+
