@@ -1,0 +1,17 @@
+Scope	cps/scopes.html#Scope	scopes: Scope	
+Scopes	cps/scopes.html#Scopes	scopes: Scopes	
+isNil	cps/scopes.html#isNil,Scope	scopes: isNil(scope: Scope): bool	
+kind	cps/scopes.html#kind,Scope	scopes: kind(scope: Scope): NimNodeKind	
+isEmpty	cps/scopes.html#isEmpty,Scope	scopes: isEmpty(scope: Scope): bool	
+`$`	cps/scopes.html#$,Scope	scopes: `$`(scope: Scope): string	
+newScope	cps/scopes.html#newScope,Scope	scopes: newScope(parent: Scope = nil): Scope	
+next	cps/scopes.html#next,Scopes	scopes: next(ns: Scopes): Scope	
+last	cps/scopes.html#last,Scopes	scopes: last(ns: Scopes): Scope	
+breakName	cps/scopes.html#breakName,NimNode	scopes: breakName(n: NimNode): NimNode	
+returnTo	cps/scopes.html#returnTo,Scope	scopes: returnTo(scope: Scope): NimNode	
+newScope	cps/scopes.html#newScope,NimNode,Scope	scopes: newScope(n: NimNode; parent: Scope = nil): Scope	
+newScope	cps/scopes.html#newScope,NimNode,NimNode,NimNode	scopes: newScope(parent: NimNode; name: NimNode; n: NimNode): Scope	
+add	cps/scopes.html#add,Scopes,NimNode,NimNode	scopes: add(ns: var Scopes; k: NimNode; n: NimNode)	
+openScope	cps/scopes.html#openScope,Scope,NimNode	scopes: openScope(s: Scope; n: NimNode): Scope	
+closeScope	cps/scopes.html#closeScope,Scope,NimNode	scopes: closeScope(s: Scope; n: NimNode): Scope	
+withScope	cps/scopes.html#withScope.t,Scope,NimNode,untyped	scopes: withScope(s: Scope; n: NimNode; body: untyped)	

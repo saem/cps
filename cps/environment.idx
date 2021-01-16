@@ -1,0 +1,43 @@
+Env	cps/environment.html#Env	environment: Env	
+insideCps	cps/environment.html#insideCps,Env	environment: insideCps(e: Env): bool	
+lastGotoLoop	cps/environment.html#lastGotoLoop,Env	environment: lastGotoLoop(e: Env): Scope	
+lastBreakLoop	cps/environment.html#lastBreakLoop,Env	environment: lastBreakLoop(e: Env): Scope	
+nextGoto	cps/environment.html#nextGoto,Env	environment: nextGoto(e: Env): Scope	
+nextBreak	cps/environment.html#nextBreak,Env	environment: nextBreak(e: Env): Scope	
+addGoto	cps/environment.html#addGoto,Env,Scope	environment: addGoto(e: var Env; scope: Scope)	
+addGoto	cps/environment.html#addGoto,Env,NimNode,NimNode	environment: addGoto(e: var Env; k: NimNode; n: NimNode)	
+addBreak	cps/environment.html#addBreak,Env,Scope	environment: addBreak(e: var Env; scope: Scope)	
+popGoto	cps/environment.html#popGoto,Env	environment: popGoto(e: var Env): NimNode	
+popBreak	cps/environment.html#popBreak,Env	environment: popBreak(e: var Env): NimNode	
+insideFor	cps/environment.html#insideFor,Env	environment: insideFor(e: Env): bool	
+insideWhile	cps/environment.html#insideWhile,Env	environment: insideWhile(e: Env): bool	
+topOfWhile	cps/environment.html#topOfWhile,Env	environment: topOfWhile(e: Env): Scope	
+namedBreak	cps/environment.html#namedBreak,Env,NimNode	environment: namedBreak(e: Env; n: NimNode): Scope	
+len	cps/environment.html#len,Env	environment: len(e: Env): int	
+isEmpty	cps/environment.html#isEmpty,Env	environment: isEmpty(e: Env): bool	
+inherits	cps/environment.html#inherits,Env	environment: inherits(e: Env): NimNode	
+identity	cps/environment.html#identity,Env	environment: identity(e: Env): NimNode	
+isDirty	cps/environment.html#isDirty,Env	environment: isDirty(e: Env): bool	
+root	cps/environment.html#root,Env	environment: root(e: Env): NimNode	
+maybeConvertToRoot	cps/environment.html#maybeConvertToRoot,Env,NimNode	environment: maybeConvertToRoot(e: Env; locals: NimNode): NimNode	
+contains	cps/environment.html#contains,Env,NimNode	environment: contains(e: Env; key: NimNode): bool	
+makeType	cps/environment.html#makeType,Env	environment: makeType(e: var Env): NimNode	
+first	cps/environment.html#first,Env	environment: first(e: Env): NimNode	
+firstDef	cps/environment.html#firstDef,Env	environment: firstDef(e: Env): NimNode	
+get	cps/environment.html#get,Env	environment: get(e: Env): NimNode	
+newEnv	cps/environment.html#newEnv,Env	environment: newEnv(parent: var Env; copy = off): Env	
+storeType	cps/environment.html#storeType,Env	environment: storeType(e: var Env; force = off): Env	
+newEnv	cps/environment.html#newEnv,NimNode,NimNode,NimNode	environment: newEnv(c: NimNode; store: var NimNode; via: NimNode): Env	
+identity	cps/environment.html#identity,Env_2	environment: identity(e: var Env): NimNode	
+rootTemplate	cps/environment.html#rootTemplate,Env	environment: rootTemplate(e: Env): NimNode	
+localSection	cps/environment.html#localSection.i,Env,NimNode	environment: localSection(e: var Env; n: NimNode): Pair	
+newContinuation	cps/environment.html#newContinuation,Env,NimNode,NimNode	environment: newContinuation(e: Env; via: NimNode; goto: NimNode; defaults = false): NimNode	
+rootResult	cps/environment.html#rootResult,Env,NimNode,NimNode	environment: rootResult(e: Env; name: NimNode; goto: NimNode = newNilLit()): NimNode	
+defineLocals	cps/environment.html#defineLocals,Env,NimNode,NimNode	environment: defineLocals(e: var Env; into: var NimNode; goto: NimNode): NimNode	
+withGoto	cps/environment.html#withGoto.t,Scope,untyped	environment: withGoto(f: Scope; body: untyped): untyped	
+withBreak	cps/environment.html#withBreak.t,Scope,untyped	environment: withBreak(s: Scope; body: untyped): untyped	
+setReturn	cps/environment.html#setReturn,Env,NimNode	environment: setReturn(e: var Env; n: NimNode)	
+rewriteReturn	cps/environment.html#rewriteReturn,Env,NimNode	environment: rewriteReturn(e: var Env; n: NimNode): NimNode	
+rewriteSymbolsIntoEnvDotField	cps/environment.html#rewriteSymbolsIntoEnvDotField,Env,NimNode	environment: rewriteSymbolsIntoEnvDotField(e: var Env; n: NimNode): NimNode	
+prepProcBody	cps/environment.html#prepProcBody,Env,NimNode	environment: prepProcBody(e: var Env; n: NimNode): NimNode	
+defineProc	cps/environment.html#defineProc,Env,NimNode	environment: defineProc(e: var Env; p: NimNode)	

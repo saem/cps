@@ -1,0 +1,40 @@
+cpsDebug	cps/spec.html#cpsDebug	spec: cpsDebug	
+cpsMagicExists	cps/spec.html#cpsMagicExists	spec: cpsMagicExists	
+cpsMutant	cps/spec.html#cpsMutant	spec: cpsMutant	
+cpsMoves	cps/spec.html#cpsMoves	spec: cpsMoves	
+cpsCast	cps/spec.html#cpsCast	spec: cpsCast	
+cpsTrace	cps/spec.html#cpsTrace	spec: cpsTrace	
+cpsExcept	cps/spec.html#cpsExcept	spec: cpsExcept	
+cpsFn	cps/spec.html#cpsFn	spec: cpsFn	
+cpsTrampBooty	cps/spec.html#cpsTrampBooty	spec: cpsTrampBooty	
+comments	cps/spec.html#comments	spec: comments	
+cpsLift	cps/spec.html#cpsLift.t	spec: cpsLift()	
+cpsCall	cps/spec.html#cpsCall.t	spec: cpsCall()	
+cpsCall	cps/spec.html#cpsCall.t,typed	spec: cpsCall(n: typed)	
+NodeFilter	cps/spec.html#NodeFilter	spec: NodeFilter	
+Continuation	cps/spec.html#Continuation	spec: Continuation	
+ContinuationProc	cps/spec.html#ContinuationProc	spec: ContinuationProc	
+Pair	cps/spec.html#Pair	spec: Pair	
+isEmpty	cps/spec.html#isEmpty,NimNode	spec: isEmpty(n: NimNode): bool	
+filter	cps/spec.html#filter,NimNode,NodeFilter	spec: filter(n: NimNode; f: NodeFilter): NimNode	
+desym	cps/spec.html#desym,NimNode	spec: desym(n: NimNode): NimNode	
+unhide	cps/spec.html#unhide,NimNode	spec: unhide(n: NimNode): NimNode	
+resym	cps/spec.html#resym,NimNode,NimNode,NimNode	spec: resym(n: NimNode; sym: NimNode; field: NimNode): NimNode	
+replacedSymsWithIdents	cps/spec.html#replacedSymsWithIdents,NimNode	spec: replacedSymsWithIdents(n: NimNode): NimNode	
+stripComments	cps/spec.html#stripComments,NimNode	spec: stripComments(n: NimNode): NimNode	
+hasPragma	cps/spec.html#hasPragma,NimNode,static[string]	spec: hasPragma(n: NimNode; s: static[string]): bool	
+filterPragma	cps/spec.html#filterPragma,seq[NimNode],NimNode	spec: filterPragma(ns: seq[NimNode]; liftee: NimNode): NimNode	
+stripPragma	cps/spec.html#stripPragma,NimNode,static[string]	spec: stripPragma(n: NimNode; s: static[string]): NimNode	
+doc	cps/spec.html#doc,string	spec: doc(s: string): NimNode	
+doc	cps/spec.html#doc,NimNode,string	spec: doc(n: var NimNode; s: string)	
+twice	cps/spec.html#twice.t,untyped	spec: twice(body: untyped): untyped	
+hash	cps/spec.html#hash,NimNode	spec: hash(n: NimNode): Hash	
+init	cps/spec.html#init,T,LineInfo	spec: init[T](c: T; l: LineInfo): T	
+definedName	cps/spec.html#definedName,NimNode	spec: definedName(n: NimNode): NimNode	
+stripVar	cps/spec.html#stripVar,NimNode	spec: stripVar(n: NimNode): NimNode	
+letOrVar	cps/spec.html#letOrVar,NimNode	spec: letOrVar(n: NimNode): NimNodeKind	
+isLiftable	cps/spec.html#isLiftable,NimNode	spec: isLiftable(n: NimNode): bool	
+hasLiftableChild	cps/spec.html#hasLiftableChild,NimNode	spec: hasLiftableChild(n: NimNode): bool	
+lineAndFile	cps/spec.html#lineAndFile.t,NimNode	spec: lineAndFile(n: NimNode): string	
+errorAst	cps/spec.html#errorAst,string	spec: errorAst(s: string): NimNode	
+errorAst	cps/spec.html#errorAst,NimNode,string	spec: errorAst(n: NimNode; s = &quot;creepy ast&quot;): NimNode	

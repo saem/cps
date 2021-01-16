@@ -1,0 +1,4 @@
+cpsXfrmProc	cps.html#cpsXfrmProc,NimNode,NimNode	cps: cpsXfrmProc(T: NimNode; n: NimNode): NimNode	
+cpsXfrm	cps.html#cpsXfrm,NimNode,NimNode	cps: cpsXfrm(T: NimNode; n: NimNode): NimNode	
+cps	cps.html#cps.m,typed,typed	cps: cps(T: typed; n: typed): untyped	
+cpsMagic	cps.html#cpsMagic.m,untyped	cps: cpsMagic(n: untyped): untyped	
