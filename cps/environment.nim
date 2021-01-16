@@ -565,7 +565,7 @@ proc defineLocals*(e: var Env; into: var NimNode; goto: NimNode): NimNode =
   else:
     # when we can reuse the continuation, we'll merely set the fn pointer
     assert into.kind == nnkStmtList
-    into.doc "re-use the local continuation by setting the fn"
+    #into.doc "re-use the local continuation by setting the fn"
     into.add newAssignment(newDotExpr(e.first, e.fn), goto)
     when true:
       # FIXME: we currently cheat.

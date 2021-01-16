@@ -138,22 +138,31 @@ func asSimpleReturnCall(n: NimNode; r: var NimNode): bool =
 proc isCpsBlock(n: NimNode): bool =
   ## `true` if the block `n` contains a cps call anywhere at all;
   ## this is used to figure out if a block needs tailcall handling...
-  case n.kind
-  of nnkElse, nnkElifBranch, nnkOfBranch:
-    result = n.last.isCpsBlock
-  of nnkBlockStmt, nnkBlockExpr:
-    echo treeRepr(n)
-    for n in n.items:
-      if n.isCpsBlock:
-        return true
-  of nnkStmtList, nnkIfStmt, nnkCaseStmt, nnkWhileStmt:
-    for n in n.items:
-      if n.isCpsBlock:
-        return true
-  of callish:
-    result = n.isCpsCall
-  else:
-    result = false
+  try:
+    case n.kind
+    # save this for an optimization
+    #of nnkElse, nnkElifBranch, nnkOfBranch, nnkBlockStmt:
+    #  return n.last.isCpsBlock
+    of nnkStmtList:
+      for n in n.items:
+        # we can skip statements subsequent to a goto
+        if n.kind in {nnkBreakStmt, nnkContinueStmt}:
+          break
+        if n.isCpsBlock:
+          return true
+    of callish:
+      return n.isCpsCall
+    # we need to vet any expression
+    elif n.len > 0:
+      for n in n.items:
+        if n.isCpsBlock:
+          return true
+    else:
+      discard
+  finally:
+    when false:
+      if result:
+        debugEcho "cps block:\n" & treeRepr(n)
 
 proc cmpKind(a, b: NimNode): int =
   if a.kind == b.kind:
@@ -395,7 +404,7 @@ proc saften(parent: var Env; n: NimNode): NimNode =
           nc.errorAst "unexpected section size"
         return
 
-      if isCpsCall(nc.last.last):
+      if nc.last.last.isCpsCall:
 
         #[
 
@@ -455,7 +464,7 @@ proc saften(parent: var Env; n: NimNode): NimNode =
         # let's get the hell outta here before things get any uglier
         return
 
-      elif isCpsBlock(nc.last.last):
+      elif nc.last.last.isCpsBlock:
         result.add:
           errorAst(nc.last, "only calls are supported here")
       else:
@@ -464,8 +473,8 @@ proc saften(parent: var Env; n: NimNode): NimNode =
           result.add list
 
     of nnkForStmt:
-      withBreak env.splitAt(n, i, "forBreak"):
-        nc[^1] = env.saften(nc[^1])
+      withBreak splitAt(env, n, i, "forBreak"):
+        nc[^1] = saften(env, nc[^1])
         result.add nc
 
     of nnkContinueStmt:
@@ -473,28 +482,28 @@ proc saften(parent: var Env; n: NimNode): NimNode =
         # if we are inside a for loop, just continue
         result.add nc
       else:
-        # else, goto the top of the loop
-        result.add:
+        # else, goto the top of the while loop
+        add result:
           tailCall env:
-            returnTo env.topOfWhile
+            returnTo topOfWhile(env)
 
     of nnkBreakStmt:
-      if env.insideFor and (len(nc) == 0 or nc[0].isEmpty):
+      if env.insideFor and (nc.len == 0 or nc[0].isEmpty):
         # unnamed break inside for loop
         result.add nc
-      elif env.nextBreak.isNil:
-        #assert false, "no break statements to pop"
+      elif nextBreak(env).isNil:
+        result.doc "next break is nil"
         result.add:
           tailCall env:
-            returnTo env.nextBreak
-      elif (len(nc) == 0 or nc[0].isEmpty):
+            returnTo nextBreak(env)
+      elif nc.len == 0 or nc[0].isEmpty:
         result.doc "simple break statement"
-        result.add:
+        add result:
           tailCall env:
-            returnTo env.nextBreak
+            returnTo nextBreak(env)
       else:
         result.doc "named break statement to " & repr(nc[0])
-        result.add:
+        add result:
           tailCall env:
             returnTo namedBreak(env, nc)
 
@@ -576,14 +585,14 @@ proc saften(parent: var Env; n: NimNode): NimNode =
     # if the child isn't last,
     if i < n.len-1:
       # and it's a cps call,
-      if nc.isCpsCall or nc.isCpsBlock:
+      if nc.isCpsBlock:
         let x = env.splitAt(n, i, "procTail")
         env.optimizeSimpleReturn(result, x.node)
         # the split is complete
         return
 
   if result.kind == nnkStmtList and n.kind in returner:
-    # let a for loop, uh, loop
+    # let a loop, uh, loop
     if env.insideFor or env.insideWhile:
       result.add:
         n.errorAst "no remaining goto for " & $n.kind
