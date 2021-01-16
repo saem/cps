@@ -141,7 +141,7 @@ proc isCpsBlock(n: NimNode): bool =
   case n.kind
   of nnkElse, nnkElifBranch:
     result = n.last.isCpsBlock
-  of nnkStmtList, nnkIfStmt:
+  of nnkStmtList, nnkIfStmt, nnkWhileStmt:
     for n in n.items:
       if n.isCpsBlock:
         return true
@@ -508,41 +508,44 @@ proc saften(parent: var Env; n: NimNode): NimNode =
             discard env.popBreak
 
     of nnkWhileStmt:
-      let name = genSym(nskProc, "whileLoop")
-      let bp = env.splitAt(n, i, "postWhile")
-      env.addBreak bp
-      # the goto is added here so that it won't appear in the break proc
-      env.addGoto nc, name
-      var loop = newStmtList()
-      result.doc "add tail call for while loop with body " & $nc[1].kind
-      # we find that the body of the loop may be optimized to not be a
-      # statement list, but this will blow saften's little mind, so we
-      # recompose it here
-      var body =
-        if nc[1].kind != nnkStmtList:
-          newStmtList [nc[1]]
-        else:
-          nc[1]
-      # we add the loop rewind to the body although it might confuse the
-      # saften call; this is deemed more correct than adding it in after
-      # the saften call, even though rewriteReturn() needs to know how to
-      # ignore `return continuation` as a result
-      body.add:
-        env.tailCall:
-          returnTo env.nextGoto
-      loop.add newIfStmt((nc[0], env.saften body))
-      # now we can remove the goto from the stack; no other code will
-      # resume at this while proc
-      discard env.popGoto
-      # this is the bottom of the while loop's proc, where we failed
-      # the loop's predicate; the same place a `break` will jump to,
-      # so we need to call the same break/post-while proc here as well
-      loop.doc "add tail call for break proc: " & repr(bp.name)
-      loop.add env.callTail(bp)
-      # this will rewrite the loop using filter, so...  it's destructive
-      result.add env.makeTail(name, loop)
-      discard env.popBreak
-      return
+      if not nc.isCpsBlock:
+        result.add env.saften(nc)
+      else:
+        let name = genSym(nskProc, "whileLoop")
+        let bp = env.splitAt(n, i, "postWhile")
+        env.addBreak bp
+        # the goto is added here so that it won't appear in the break proc
+        env.addGoto nc, name
+        var loop = newStmtList()
+        result.doc "add tail call for while loop with body " & $nc[1].kind
+        # we find that the body of the loop may be optimized to not be a
+        # statement list, but this will blow saften's little mind, so we
+        # recompose it here
+        var body =
+          if nc[1].kind != nnkStmtList:
+            newStmtList [nc[1]]
+          else:
+            nc[1]
+        # we add the loop rewind to the body although it might confuse the
+        # saften call; this is deemed more correct than adding it in after
+        # the saften call, even though rewriteReturn() needs to know how to
+        # ignore `return continuation` as a result
+        body.add:
+          env.tailCall:
+            returnTo env.nextGoto
+        loop.add newIfStmt((nc[0], env.saften body))
+        # now we can remove the goto from the stack; no other code will
+        # resume at this while proc
+        discard env.popGoto
+        # this is the bottom of the while loop's proc, where we failed
+        # the loop's predicate; the same place a `break` will jump to,
+        # so we need to call the same break/post-while proc here as well
+        loop.doc "add tail call for break proc: " & repr(bp.name)
+        loop.add env.callTail(bp)
+        # this will rewrite the loop using filter, so...  it's destructive
+        result.add env.makeTail(name, loop)
+        discard env.popBreak
+        return
 
     of nnkIfStmt:
       # if any `if` clause is a cps block, then every clause must be
