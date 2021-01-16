@@ -29,8 +29,8 @@ when defined(yourdaywillcomelittleonecommayourdaywillcomedotdotdot):
 proc isCpsCall(n: NimNode): bool =
   ## true if this node holds a call to a cps procedure
   assert not n.isNil
-  if len(n) > 0:
-    if n.kind in callish:
+  if n.kind in callish:
+    if n.len > 0:
       let p = n[0].getImpl
       result = p.hasPragma("cpsCall")
 
@@ -478,88 +478,123 @@ proc saften(parent: var Env; n: NimNode): NimNode =
         result.add nc
 
     of nnkContinueStmt:
-      if env.insideFor:
-        # if we are inside a for loop, just continue
+      if not insideCps(env):
+        # who cares?
         result.add nc
       else:
-        # else, goto the top of the while loop
-        add result:
-          tailCall env:
-            returnTo topOfWhile(env)
+        if env.insideFor:
+          # if we are inside a for loop, just continue
+          result.add nc
+        else:
+          # else, goto the top of the while loop
+          add result:
+            tailCall env:
+              returnTo topOfWhile(env)
 
     of nnkBreakStmt:
-      if env.insideFor and (nc.len == 0 or nc[0].isEmpty):
-        # unnamed break inside for loop
+      if not insideCps(env):
+        # who cares?
         result.add nc
-      elif nextBreak(env).isNil:
-        result.doc "next break is nil"
-        result.add:
-          tailCall env:
-            returnTo nextBreak(env)
-      elif nc.len == 0 or nc[0].isEmpty:
-        result.doc "simple break statement"
-        add result:
-          tailCall env:
-            returnTo nextBreak(env)
+        # we don't return here because there could be some
+        # bizarre reason that the ast is funky...
       else:
-        result.doc "named break statement to " & repr(nc[0])
-        add result:
-          tailCall env:
-            returnTo namedBreak(env, nc)
+        if nc.len == 0 or nc[0].isEmpty:
+          # unnamed break
+          if env.insideFor:
+            # inside for loop
+            result.add nc
+            # XXX: we should arguably not return here, either
+          else:
+            # inside while/block
+            var goto = nextBreak(env)
+            if goto.isNil:
+              result.doc "next break is nil; using goto instead"
+              goto = nextGoto(env)
+            add result:
+              tailCall env:
+                returnTo goto
+        else:
+          # named break
+          result.doc "named break statement to " & repr(nc[0])
+          assert not namedBreak(env, nc).isNil
+          add result:
+            tailCall env:
+              returnTo namedBreak(env, nc)
+        return
 
     of nnkBlockStmt:
-      let bp = env.splitAt(n, i, "blockBreak")
-      env.addBreak bp
-      withGoto bp:
-        try:
-          result.add env.saften(nc)
-          if i < n.len-1 or env.insideCps:
-            result.doc "add tail call for block-break proc"
-            result.add env.callTail(env.nextBreak)
-            return
-        finally:
-          if not bp.isEmpty:
-            discard env.popBreak
+      if not nc.isCpsBlock:
+        when true:
+          {.warning: "to avoid a split, we need a goto-free continue/break".}
+        else:
+          result.add:
+            newBlockStmt nc[0]:
+              saften env:
+                newStmtList:
+                  [doc"boring block", nc.last]
+      # create a break and add it to our scope
+      let bp = splitAt(env, n, i, "blockBreak")
+      addBreak(env, bp)
+      assert not nextBreak(env).isNil
+      # use that break as our goto; they go to the same place
+      addGoto(env, bp)
+      try:
+        # add the block body
+        assert not nextBreak(env).isNil
+        result.add:
+          saften env:
+            newStmtList:
+              [doc"block body", nc.last]
+        assert not nextBreak(env).isNil
+        result.doc "add tail call for block-break proc"
+        result.add:
+          env.callTail env.nextBreak
+        return
+      finally:
+        discard popGoto env
+        discard popBreak env
 
     of nnkWhileStmt:
       if not nc.isCpsBlock:
-        result.add env.saften(nc)
-      else:
-        let name = genSym(nskProc, "whileLoop")
-        let bp = env.splitAt(n, i, "postWhile")
-        env.addBreak bp
-        # the goto is added here so that it won't appear in the break proc
-        env.addGoto nc, name
-        var loop = newStmtList()
-        result.doc "add tail call for while loop with body " & $nc[1].kind
-        # we find that the body of the loop may be optimized to not be a
-        # statement list, but this will blow saften's little mind, so we
-        # recompose it here
-        var body =
-          if nc[1].kind != nnkStmtList:
-            newStmtList [nc[1]]
-          else:
-            nc[1]
-        # we add the loop rewind to the body although it might confuse the
-        # saften call; this is deemed more correct than adding it in after
-        # the saften call, even though rewriteReturn() needs to know how to
-        # ignore `return continuation` as a result
-        body.add:
-          env.tailCall:
-            returnTo env.nextGoto
-        loop.add newIfStmt((nc[0], env.saften body))
-        # now we can remove the goto from the stack; no other code will
-        # resume at this while proc
-        discard env.popGoto
-        # this is the bottom of the while loop's proc, where we failed
-        # the loop's predicate; the same place a `break` will jump to,
-        # so we need to call the same break/post-while proc here as well
-        loop.doc "add tail call for break proc: " & repr(bp.name)
-        loop.add env.callTail(bp)
-        # this will rewrite the loop using filter, so...  it's destructive
-        result.add env.makeTail(name, loop)
-        discard env.popBreak
-        return
+        when true:
+          {.warning: "to avoid a split, we need a goto-free continue/break".}
+        else:
+          result.add env.saften(nc)
+      let name = genSym(nskProc, "whileLoop")
+      let bp = env.splitAt(n, i, "postWhile")
+      addBreak(env, bp)
+      # the goto is added here so that it won't appear in the break proc
+      addGoto(env, nc, name)
+      var loop = newStmtList()
+      result.doc "add tail call for while loop with body " & $nc[1].kind
+      # we find that the body of the loop may be optimized to not be a
+      # statement list, but this will cause us to not correctly create a
+      # new scoped environment, so we ensure the correct form here
+      var body =
+        if nc[1].kind != nnkStmtList:
+          newStmtList [nc[1]]
+        else:
+          nc[1]
+      # we add the loop rewind to the body although it might confuse the
+      # saften call; this is deemed more correct than adding it in after
+      # the saften call, even though rewriteReturn() needs to know how to
+      # ignore `return continuation` as a result
+      body.add:
+        env.tailCall:
+          returnTo nextGoto(env)
+      loop.add newIfStmt((nc[0], env.saften body))
+      # now we can remove the goto from the stack; no other code will
+      # resume at this while proc
+      discard popGoto(env)
+      # this is the bottom of the while loop's proc, where we failed
+      # the loop's predicate; the same place a `break` will jump to,
+      # so we need to call the same break/post-while proc here as well
+      loop.doc "add tail call for break proc: " & repr(bp.name)
+      loop.add callTail(env, bp)
+      # this will rewrite the loop using filter, so...  it's destructive
+      result.add makeTail(env, name, loop)
+      discard popBreak(env)
+      return
 
     of nnkIfStmt, nnkCaseStmt:
       # if any clause is a cps block, then every clause must be.
@@ -571,11 +606,11 @@ proc saften(parent: var Env; n: NimNode): NimNode =
           return
         result.add:
           nc.errorAst "unexpected control flow from if/case"
-      elif insideCps(env):
-        result.doc "if/of body inside cps"
-        result.add env.saften(nc)
       else:
-        result.doc "boring if/of clause"
+        if insideCps(env):
+          result.doc "if/of body inside cps"
+        else:
+          result.doc "boring if/of clause"
         result.add env.saften(nc)
 
     # not a statement cps is interested in

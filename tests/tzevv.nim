@@ -1,6 +1,3 @@
-const
-  skippy {.booldefine.} = false
-
 import testes
 import posix
 import std/macros
@@ -57,7 +54,7 @@ template runCps(body: untyped) =
 
 var r: int
 
-testes:
+suite "zevv":
 
   test "nocall":
     expPrims 0: runCps:
@@ -258,7 +255,7 @@ testes:
     proc test1() {.cps:C} =
       foo(1.int16)
     discard test1()
-   
+
   test "type problem":
     type Thing = distinct int
     proc foo(): Thing = 1.Thing
