@@ -141,7 +141,12 @@ proc isCpsBlock(n: NimNode): bool =
   case n.kind
   of nnkElse, nnkElifBranch, nnkOfBranch:
     result = n.last.isCpsBlock
-  of nnkStmtList, nnkIfStmt, nnkWhileStmt, nnkCaseStmt:
+  of nnkBlockStmt, nnkBlockExpr:
+    echo treeRepr(n)
+    for n in n.items:
+      if n.isCpsBlock:
+        return true
+  of nnkStmtList, nnkIfStmt, nnkCaseStmt, nnkWhileStmt:
     for n in n.items:
       if n.isCpsBlock:
         return true
