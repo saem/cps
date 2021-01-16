@@ -31,8 +31,7 @@ proc run(c: C) =
 
 # This checks if the trampoline jumped the right number of times
 
-template expJumps(expect: int, body: untyped) =
-  body
+template expJumps(expect: int) =
   doAssert jumps == expect, "Trampoline jumped " & $jumps & " times, expected " & $expect
 
 # is a primitive that keeps track of how often it is called, verify with
@@ -265,4 +264,12 @@ testes:
     proc foo(): Thing = 1.Thing
     runCps:
       var a = foo()
+
+  test "too many splits":
+    runCPS:
+      var n = 0
+      # There is no CPS call in the loop below, so there is no need to split
+      while n == 0:
+        inc n
+    expJumps 1
 
