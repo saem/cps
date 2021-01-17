@@ -98,8 +98,8 @@ proc topOfWhile*(e: Env): Scope =
 
 proc namedBreak*(e: Env; n: NimNode): Scope =
   ## fetch the goto target in order to `break foo`
-  assert n.kind == nnkBreakStmt
-  if len(n) == 0:
+  assert n.isBreak
+  if not n.isNamedBreak:
     result = e.nextBreak
   else:
     proc match(ns: Scopes): Scope =
@@ -201,6 +201,7 @@ proc maybeConvertToRoot*(e: Env; locals: NimNode): NimNode =
     locals
 
 proc init(e: var Env) =
+  e.locals = initOrderedTable[NimNode, NimNode]()
   e.seen = initHashSet[string]()
   if e.fn.isNil:
     when cpsFn:
@@ -303,25 +304,24 @@ proc newEnv*(parent: var Env; copy = off): Env =
   ## this is called as part of the recursion in the front-end,
   ## or on-demand in the back-end (with copy = on)
   assert not parent.isNil
-  if copy:
-    var scope = newScope()
-    scope.goto = parent.scope
-    scope.brake = parent.scope
-    result = Env(store: parent.store,
-                 via: parent.identity,
-                 seen: parent.seen,
-                 locals: initOrderedTable[NimNode, NimNode](),
-                 c: parent.c,
-                 ex: parent.ex,
-                 rs: parent.rs,
-                 fn: parent.fn,
-                 gotos: parent.gotos,
-                 breaks: parent.breaks,
-                 scope: scope,
-                 parent: parent)
-    init result
-  else:
-    result = parent
+  if not copy:
+    return parent
+  var scope = newScope()
+  scope.goto = parent.scope
+  scope.brake = parent.scope
+  result = Env(store: parent.store, via: parent.identity,
+               seen: parent.seen,
+               ex: parent.ex, rs: parent.rs, fn: parent.fn,
+               gotos: parent.gotos, breaks: parent.breaks,
+               c: parent.c, scope: scope, parent: parent)
+  init result
+
+proc newEnv*(parent: var Env; n: NimNode): Env =
+  ## called from saften; we will examine `n` to determine whether this
+  ## env should instantiate a new scope or not
+  const newScopes = {nnkBlockStmt, nnkOfBranch, nnkElifBranch, nnkElse,
+                     nnkWhileStmt, nnkForStmt}
+  result = newEnv(parent, copy = n.kind in newScopes)
 
 when defined(whenyouwishuponastarmakesnodifferencewhoyouare):
   proc makeFnType(e: Env): NimNode =
@@ -682,6 +682,8 @@ proc rewriteReturn*(e: var Env; n: NimNode): NimNode =
     of nnkEmpty, nnkIdent:
       # this is `return` or `return continuation`, so that's fine...
       result = n
+    of nnkNilLit:
+      result = n
     else:
       result = n.errorAst "malformed return"
 
@@ -689,7 +691,7 @@ proc rewriteSymbolsIntoEnvDotField*(e: var Env; n: NimNode): NimNode =
   ## swap symbols for those in the continuation
   result = n
   let child = e.castToChild(e.first)
-  for field, section in pairs(e):
+  for field, section in e.pairs:
     result = result.resym(section[0][0], newDotExpr(child, field))
 
 proc prepProcBody*(e: var Env; n: NimNode): NimNode =

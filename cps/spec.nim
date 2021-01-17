@@ -52,7 +52,10 @@ proc filter*(n: NimNode; f: NodeFilter): NimNode =
       result.add filter(kid, f)
 
 proc desym*(n: NimNode): NimNode =
-  result = if n.kind == nnkSym: ident(repr n) else: n
+  if n.kind == nnkSym:
+    ident(repr n)
+  else:
+    n
 
 proc unhide*(n: NimNode): NimNode =
   ## unwrap hidden conversion nodes and erase their types
@@ -272,3 +275,13 @@ proc errorAst*(s: string): NimNode =
 proc errorAst*(n: NimNode; s = "creepy ast"): NimNode =
   ## embed an error with a message
   errorAst s & ":\n" & treeRepr(n) & "\n"
+
+proc isBreak*(n: NimNode): bool =
+  if not n.isNil:
+    result = n.kind == nnkBreakStmt
+
+proc isNamedBreak*(n: NimNode): bool =
+  if n.isBreak:
+    if n.len > 0:
+      if not n[0].isNil:
+        result = n[0].kind in {nnkSym, nnkIdent}

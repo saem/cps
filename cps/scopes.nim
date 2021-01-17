@@ -10,7 +10,8 @@ import std/macros
 import cps/spec
 
 const
-  scopeful = {nnkTryStmt, nnkWhileStmt, nnkIfStmt, nnkBlockStmt, nnkForStmt}
+  scopeful = {nnkTryStmt, nnkWhileStmt, nnkIfStmt, nnkBlockStmt, nnkForStmt,
+              nnkElifBranch, nnkElse, nnkOfBranch}
 
 type
   Scope* = ref object
@@ -32,9 +33,9 @@ func isNil*(scope: Scope): bool =
 proc kind*(scope: Scope): NimNodeKind =
   ## what kind of ast created the scope?
   if not scope.parent.isNil and not scope.parent.isEmpty:
-    result = scope.parent.kind
+    scope.parent.kind
   else:
-    result = scope.kind
+    scope.kind
 
 func isEmpty*(scope: Scope): bool =
   ## `true` if the scope `scope` is Empty or Nil
@@ -49,6 +50,12 @@ proc `$`*(scope: Scope): string =
     result = "🔭(kind: $1, name: $2, label: $4, node: $3)" % [
       $scope.kind, repr(scope.name),
       lispRepr(scope.node), repr(scope.label) ]
+
+proc `$`*(scopes: Scopes): string =
+  for s in scopes.items:
+    if result.len > 0:
+      result.add "\n"
+    result.add $s
 
 proc newScope*(parent: Scope = nil): Scope =
   ## sentinel value for searches, etc.
@@ -75,11 +82,10 @@ proc last*(ns: Scopes): Scope =
       break
 
 proc breakName*(n: NimNode): NimNode =
-  result =
-    if n.kind in {nnkBlockStmt} and len(n) > 1:
-      n[0]
-    else:
-      newEmptyNode()
+  if n.kind in {nnkBlockStmt} and len(n) > 1:
+    n[0]
+  else:
+    newEmptyNode()
 
 proc returnTo*(scope: Scope): NimNode =
   ## given a scope, find the ident|sym it's pointing to, or `nil`
@@ -121,10 +127,16 @@ proc newScope*(parent: NimNode; name: NimNode; n: NimNode): Scope =
   result.parent = parent
   result.label = parent.breakName
 
-proc add*(ns: var Scopes; k: NimNode; n: NimNode) =
+proc add*(ss: var Scopes; s: Scope) =
+  if s.isNil:
+    raise newException(Defect, "attempt to add nil scope")
+  else:
+    system.add(ss, s)
+
+proc add*(ss: var Scopes; k: NimNode; n: NimNode) =
   assert n.kind in {nnkIdent, nnkSym}
   var scope = newScope(k, n, n)
-  ns.add scope
+  ss.add scope
 
 proc openScope*(s: Scope; n: NimNode): Scope =
   ## open a new scope for the given node; returns the current scope
@@ -146,9 +158,13 @@ proc closeScope*(s: Scope; n: NimNode): Scope =
 
 template withScope*(s: Scope; n: NimNode; body: untyped) =
   ## do some work on a particular node with a particular scope
-  openScope(s, n)
-  try:
-    var scope {.inject} = s
+  if n.kind in scopeful:
+    var ns = openScope(s, n)
+    try:
+      var scope {.inject.} = ns
+      body
+    finally:
+      discard closeScope(s, n)
+  else:
+    var scope {.inject.} = s
     body
-  finally:
-    closeScope(s, n)
