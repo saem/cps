@@ -25,6 +25,7 @@ const
 template cpsLift*() {.pragma.}          ## lift this proc|type
 template cpsCall*() {.pragma.}          ## a cps call
 template cpsCall*(n: typed) {.pragma.}  ## redirection
+template cpsBoot*() {.pragma.}          ## mark the boot procs with this
 
 type
   NodeFilter* = proc(n: NimNode): NimNode
@@ -52,7 +53,11 @@ proc filter*(n: NimNode; f: NodeFilter): NimNode =
       result.add filter(kid, f)
 
 proc desym*(n: NimNode): NimNode =
-  result = if n.kind == nnkSym: ident(repr n) else: n
+  if n.kind == nnkSym:
+    result = ident(repr n)
+    result.copyLineInfo(n) #preserve line info for useful errors
+  else:
+    result = n
 
 proc unhide*(n: NimNode): NimNode =
   ## unwrap hidden conversion nodes and erase their types
@@ -88,7 +93,8 @@ proc unhide*(n: NimNode): NimNode =
 proc resym*(n: NimNode; sym: NimNode; field: NimNode): NimNode =
   ## seems we only use this for rewriting local symbols into symbols
   ## in the env, so we'll do custom handling of identDefs here also
-  expectKind(sym, nnkSym)
+  # expectKind(sym, nnkSym)
+  # XXX: disabled this check because of the `ident"result"` in environment.init
   proc resymify(n: NimNode): NimNode =
     case n.kind
     of nnkIdentDefs:
@@ -109,6 +115,9 @@ proc replacedSymsWithIdents*(n: NimNode): NimNode =
     case n.kind
     #of nnkTypeSection:
     #  result = n
+    of {nnkOpenSymChoice, nnkClosedSymChoice}:
+      # XXX: this should really be a const
+      result = n
     of nnkSym:
       if n.strVal notin ["cpsLift", "cpsCall"]:
         result = desym n

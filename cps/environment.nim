@@ -210,7 +210,7 @@ proc init(e: var Env) =
   if e.ex.isNil:
     e.ex = genSym(nskField, "ex")
   if e.rs.isNil:
-    e.rs = genSym(nskField, "result")
+    e.rs = ident"result"
   e.id = genSym(nskType, "env")
 
 proc allPairs(e: Env): seq[Pair] =
@@ -676,7 +676,7 @@ proc rewriteReturn*(e: var Env; n: NimNode): NimNode =
       # okay, it's a return: result = ...
       result = newStmtList()
       # ignore the result symbol and create a new assignment
-      result.add newAssignment(e.rs, n.last.last)
+      result.add newAssignment(newDotExpr(e.castToChild(e.first), e.rs), n.last.last)
       # and just issue an empty `return`
       result.add nnkReturnStmt.newNimNode(n).add newEmptyNode()
     of nnkEmpty, nnkIdent:

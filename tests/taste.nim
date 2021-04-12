@@ -555,6 +555,35 @@ testes:
       check r == 3
 
   block:
+    ## keep on CPSing (working title)
+    ## XXX: this was mostly to test to see if the while could be transformed
+    ##      'assignment shim with constant' can probably take over
+    r = 0
+    proc bar(a: int): int {.cps: Cont.} =
+      inc r
+      noop()
+      return a * 2
+
+    proc foo() {.cps: Cont.} =
+      inc r
+      # generated start -- this needs two passes :(
+      var c = bar(4)
+      while c != nil and c.fn != nil:
+        c = c.fn(c)
+      # generated end
+      # let x = #[receiver/sender]# int bar(4)
+      inc r
+      # check x == 8
+
+    trampoline foo()
+    check r == 3
+
+  # 1. proc -> proc
+  # 2. proc -> cps
+  # 3. cps  -> cps
+  # 4. cps  -> proc
+
+  block:
     ## while statement with local var inside
     r = 0
     proc foo() {.cps: Cont.} =

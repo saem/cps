@@ -1,0 +1,30 @@
+{
+  "configurations": [
+    {
+      "name": "(gdb) cps test while",
+      "type": "cppdbg",
+      "request": "launch",
+      // "program": "${workspaceFolder}/bin/nim_temp",
+      // "program": "${workspaceFolder}/bin/nimsuggest_dbg",
+      "program": "${workspaceFolder}/../Nim/bin/nim_temp",
+      // "program": "${workspaceFolder}/tests/untestable/gdb/gdb_pretty_printer_test_program",
+      "args": ["c", "-r", "--outdir:${workspaceFolder}/cps/tests", "--path=${workspaceFolder}", "-d:cpsDebug", "--lib:./Nim/lib", "${workspaceFolder}/tests/while.nim"],
+      // "args": ["--stdin", "--debug", "--log", "--backend:js", "--maxresults:20", "--v2", "tests/js/t11166.nim"],
+      // "args": ["js", "-d:useNodeIds", "--outdir:/home/saem/Development/nim/vscode-nim/out", "--checks:on", "--sourceMap", "/home/saem/Development/nim/vscode-nim/src/nimvscode.nim"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "nim-gdb",
+      "setupCommands": [
+              {
+                      "description": "Enable pretty-printing for gdb",
+                      "text": "-enable-pretty-printing",
+                      "ignoreFailures": true
+              }
+      ],
+      "logging": { "engineLogging": true }
+    }
+  ]
+}

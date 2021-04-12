@@ -1,11 +1,12 @@
 import std/macros
 import std/sequtils
 import std/algorithm
+import std/genasts
 
 import cps/spec
 import cps/scopes
 import cps/environment
-export Continuation, ContinuationProc, cpsCall
+export Continuation, ContinuationProc, cpsCall, cpsBoot
 export cpsDebug, cpsTrace, cpsMutant
 
 template installLocal(id, env, field) =
@@ -26,13 +27,39 @@ when defined(yourdaywillcomelittleonecommayourdaywillcomedotdotdot):
   const
     cpsish = {nnkYieldStmt, nnkContinueStmt}  ## precede cps calls
 
+func getSym(n: NimNode): NimNode =
+  ## Get the symbol producing the return value of a call
+  case n.kind
+  of nnkDotExpr:
+    getSym(n[1])
+  else:
+    n
+
 proc isCpsCall(n: NimNode): bool =
   ## true if this node holds a call to a cps procedure
   assert not n.isNil
   if len(n) > 0:
     if n.kind in callish:
-      let p = n[0].getImpl
-      result = p.hasPragma("cpsCall")
+      let p = getSym(n[0]).getImpl
+      result =
+        # can't use a boolean expression because the VM blows up :(
+        if p != nil and p.kind == nnkProcDef:
+          p.hasPragma("cpsCall")
+        else:
+          false
+
+proc isReturnsContinuation(n: NimNode): bool =
+  # XXX: this might become unnecssary
+  assert not n.isNil
+  if len(n) > 0:
+    if n.kind in callish:
+      let p = getSym(n[0]).getImpl
+      result =
+        # can't use a boolean expression because the VM blows up :(
+        if p != nil and p.kind == nnkProcDef:
+          (p.hasPragma("cpsCall") or p.hasPragma("cpsBoot"))
+        else:
+          false
 
 proc firstReturn(p: NimNode): NimNode =
   ## find the first return statement within statement lists, or nil
@@ -72,7 +99,12 @@ template addReturn(e: var Env; p: NimNode; n: untyped) =
 proc tailCall(e: var Env; p: NimNode; n: NimNode): NimNode =
   ## compose a tail call from the environment `e` via cps call `p`
   # install locals as the 1st argument
-  assert p.isCpsCall, "does not appear to be a cps call"
+
+  # XXX: this can probably go back to p.isCpsCall
+  if not p.isReturnsContinuation:
+    echo "p: " & repr(p)
+    echo "n: " & repr(n)
+  assert p.isReturnsContinuation, "does not appear to be a cps call"
   result = newStmtList()
   # goto supplied identifier, not nextGoto!
   let locals = e.defineLocals(result, n)
@@ -86,7 +118,9 @@ proc tailCall(e: var Env; p: NimNode; n: NimNode): NimNode =
 
 proc tailCall(e: var Env; n: NimNode): NimNode =
   ## compose a tail call from the environment `e` to ident (or nil) `n`
-  assert not n.isCpsCall
+  
+  # XXX: this can probably go back to p.isCpsCall
+  assert not n.isReturnsContinuation
   var ret = nnkReturnStmt.newNimNode(n)
   if n.kind == nnkNilLit:
     # we don't want to "fall back" to goto here
@@ -341,13 +375,14 @@ proc saften(parent: var Env; n: NimNode): NimNode =
   # the result is a copy of the current node
   result = copyNimNode n
   result.doc "saften at " & n.lineAndFile
-
+  # echo "start\n" & repr(n) & "\nend\n"
   # we're going to iterate over the (non-comment) children
   for i, nc in n.pairs:
     if nc.isNil:
       result.add nc
       continue
     # if it's a cps call,
+    # echo repr nc
     if nc.isCpsCall:
       # we want to make sure that a pop inside the after body doesn't
       # return to after itself, so we don't add it to the goto list...
@@ -390,7 +425,9 @@ proc saften(parent: var Env; n: NimNode): NimNode =
           nc.errorAst "unexpected section size"
         return
 
-      if isCpsCall(nc.last.last):
+      if isReturnsContinuation(nc.last.last):
+        # nc.last.last is a the rhs of a var/let, and the rewrites prior ensure
+        # only one var or let per section.
 
         #[
 
@@ -416,37 +453,20 @@ proc saften(parent: var Env; n: NimNode): NimNode =
 
         ]#
 
-        # add the local into the env so we can install the field
-        var field: NimNode
-        for name, list in env.localSection(nc):
-          # our rewrite pass should prevent this guard from triggering
-          if not field.isNil:
-            result.add:
-              nc.errorAst "too many variable names in section"
-          field = name
+        let
+          c = genSym(nskVar, "c")
+          asgn = newDotExpr(c, ident"result")
+          identDef = newIdentDefs(nc.last[0], newEmptyNode(), asgn)
+          origSymAssign = newNimNode(nc.kind).add(identDef)
 
-        # XXX: probably should be i and not i+1
-        # skip this node by passing i + 1 to the split
-        let after = env.splitAt(n, i + 1, "afterShim")
-        # we add it to the goto stack as usual
-        env.addGoto(after)
-
-        let call = nc.last[^1]
-        let variable = nc.last[0]
-        # our field is gensym'd but the strVal should match
-        assert variable.strVal == field.strVal
-
-        var body = newStmtList()
-        # add the call to the cps proc and let it get saftened as per usual
-        body.add call
-        let shim = procScope(env, nc, body, "shim")
-        assert shim.name != nil
-
-        # now we'll add a tail call to the shim; gratuitous returnTo?
         result.add:
-          tailCall(env, shim.name):
-            returnTo after
-
+          genAst(c, origSymAssign, val = nc.last.last):
+            # XXX: lol, we ate your return
+            var c = val
+            while c != nil and c.fn != nil:
+              c = c.fn(c)
+            origSymAssign
+        
         # let's get the hell outta here before things get any uglier
         return
 
@@ -706,6 +726,9 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
 
     booty = cloneProc n
     booty.body = newStmtList()
+    # mark boot procs so we can discriminate them later
+    # XXX: this might not prove useful
+    booty.addPragma ident"cpsBoot"
 
     # add the remaining proc params to the environment
     # and set them up in the bootstrap at the same time
@@ -812,12 +835,13 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
 
 proc workaroundRewrites(n: NimNode): NimNode =
   proc workaroundSigmatchSkip(n: NimNode): NimNode =
-    if n.kind in nnkCallKinds:
+    let skipKinds = (AtomicNodes + {nnkOpenSymChoice, nnkClosedSymChoice})
+    if n.kind notin skipKinds or n.kind in nnkCallKinds:
       # We recreate the nodes here, to set their .typ to nil
       # so that sigmatch doesn't decide to skip it
       result = newNimNode(n.kind, n)
       for child in n.items:
-        if child.kind notin AtomicNodes:
+        if child.kind notin skipKinds:
           var newChild = newNimNode(child.kind, child)
           for grandchild in child.items:
             newChild.add workaroundRewrites grandchild
