@@ -2,5 +2,5 @@
 {
     "nim.buildCommand": "c",
     "nim.runOutputDirectory": "out",
-    "nim.project": ["cps.nim"]
+    "nim.project": ["cps.nim"],
 }

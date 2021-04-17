@@ -30,19 +30,11 @@ proc bar(a: int): int {.cps: Cont.} =
 proc foo() {.cps: Cont.} =
   inc r
   let x = bar(4)
-  # generated start -- this needs two passes :(
-  # block:
-  #   var c = x
-  #   while c != nil and c.fn != nil:
-  #     c = c.fn(c)
-
-  # generated end
-  # let x = #[receiver/sender]# int bar(4)
   inc r
-  # doAssert x == 8
+  doAssert x == 8
 
 trampoline foo()
-doAssert r == 2
+doAssert r == 3, $r
 
 # import cps
 
@@ -85,3 +77,35 @@ doAssert r == 2
 #   inc r
 # trampoline foo()
 # assert r == 8
+
+# this is me thinking terrible thoughts in regards to the transform
+
+# proc baz() =
+#   echo "baz"
+
+# baz()
+
+# # ----
+
+# var exec = DefaultExecutor()
+
+# m_IndicateLeavingTopLevel(exec) # how we know what we're leaving (drop a marker const/let/var)
+# m_setInnerBazLocation(exec)     # how to know where we're going
+# m_considerPreemption(exec)      # could run something else
+# m_considerAbort(exec)           # after we come back we decide it was all wrong
+# m_pushBazContinuations(exec)
+# m_pushBazEnv(exec)
+# m_pushBazParams(exec)
+# #inside baz
+# let
+#   continuations = popBazContinuations()
+#   env = popBazEnv()
+#   params = popBazParams()
+# innerBazBeforeEcho(params)
+
+# pushEchoContinuations()
+# pushEchoEnv()
+# pushEchoParams()
+# gotoEcho()
+
+

@@ -87,6 +87,8 @@ proc addReturn(p: var NimNode; n: NimNode) =
         when cpsMoves:
           nnkReturnStmt.newNimNode(n).add newEmptyNode()
         else:
+          echo "wtf: ", repr(n)
+          # assert false, "heck"
           nnkReturnStmt.newNimNode(n).add n
   else:
     p.doc "omitted a return of " & repr(n)
@@ -114,7 +116,7 @@ proc tailCall(e: var Env; p: NimNode; n: NimNode): NimNode =
     result.add newAssignment(e.first, p)
     result.addReturn newEmptyNode()
   else:
-    result.addReturn p
+    result.addReturn newNimNode(nnkCast).add(e.identity).add(p)
 
 proc tailCall(e: var Env; n: NimNode): NimNode =
   ## compose a tail call from the environment `e` to ident (or nil) `n`
@@ -375,6 +377,7 @@ proc saften(parent: var Env; n: NimNode): NimNode =
   # the result is a copy of the current node
   result = copyNimNode n
   result.doc "saften at " & n.lineAndFile
+
   # echo "start\n" & repr(n) & "\nend\n"
   # we're going to iterate over the (non-comment) children
   for i, nc in n.pairs:
@@ -464,7 +467,7 @@ proc saften(parent: var Env; n: NimNode): NimNode =
             # XXX: lol, we ate your return
             var c = val
             while c != nil and c.fn != nil:
-              c = c.fn(c)
+              c = cast[typeOf(c)](c.fn(c))
             origSymAssign
         
         # let's get the hell outta here before things get any uglier
@@ -695,15 +698,15 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
   # establish a new environment with the supplied continuation type;
   # accumulates byproducts of cps in the types statement list
   var types = newStmtList()
-  var env: Env
-
+  
   # creating the env with the continuation type,
   # and adding proc parameters to the env
-  var first = 1 # index of first param to add to locals
+  var env: Env
   when cpsMutant:
     env = newEnv(ident"result", types, T)
   else:
     env = newEnv(ident"continuation", types, T)
+  let envT = desym env.identity
 
   # assign the return type if necessary
   if not n.params[0].isEmpty:
@@ -720,6 +723,7 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
   ## as the "bootstrap" which performs alloc of the continuation before
   ## calling the cps version of the proc
 
+  var first = 1 # index of first param to add to locals
   var booty: NimNode
   block:
     let name = env.first      # ident"result" or ident"continuation", etc.
@@ -741,7 +745,7 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
     when not cpsMutant:
       when cpsTrampBooty:
         # if we're not storing to result, we need a variable
-        booty.body.add nnkVarSection.newTree newIdentDefs(name, T,
+        booty.body.add nnkVarSection.newTree newIdentDefs(name, envT,
                                                           newEmptyNode())
         # XXX: this may fail if requires-init
         # now we can insert our `result =`, which includes the proc params
@@ -769,7 +773,7 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
         # add the trampoline to the bootstrap
         booty.body.add wh
       else:
-        booty.params[0] = T
+        booty.params[0] = envT
         # XXX: this may fail if requires-init
         # now we can insert our `result =`, which includes the proc params
         booty.body.add env.rootResult(ident"result", booty.name)
@@ -789,7 +793,7 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
   inc first   # gratuitous tracking for correctness
 
   # install our return type in the clone
-  n.params[0] = T
+  n.params[0] = envT
 
   # now remove any other arguments (for now)
   while len(n.params) > 2:
@@ -803,6 +807,24 @@ proc cpsXfrmProc(T: NimNode, n: NimNode): NimNode =
 
   # ensaftening the proc's body
   n.body = env.saften(n.body)
+
+  # XXX: cast the continuation to ours because we can't work with anything else
+  let
+    shadowEnv = ident(env.first.strVal)
+    envParam = env.first
+    castVal = newNimNode(nnkCast).add(envT).add(envParam)
+    shadowDef = newIdentDefs(shadowEnv, newEmptyNode(), castVal)
+    butts = newNimNode(nnkVarSection).add(shadowDef)
+
+  # echo "butts: ", repr(butts), "\nheck: ", repr(n.body)
+
+  case n.body.kind
+  of nnkStmtList:
+    n.body.insert(0, butts)
+  of nnkEmpty:
+    discard
+  else:
+    n.body = newStmtList(butts, result)
 
   when false:
     if len(preamble) > 0:           # if necessary, insert the preamble
