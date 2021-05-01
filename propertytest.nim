@@ -438,7 +438,7 @@ proc assertProperty*[T](name: string, arb: Arbitrary[T], pred: Predicate[T],
   
   result = report
   # XXX: this shouldn't be an doAssert like this, need a proper report
-  # doAssert didSucceed, fmt"Fail({runId}): {r} - {s.value}"
+  doAssert result.isSuccessful, $result
   
   # XXX: if we made it this far assume it worked
   # return true
@@ -465,9 +465,9 @@ proc assertProperty*[A, B](
     if not didSucceed:
       result.recordFailure(s.value, r)
 
-    # XXX: this shouldn't be an doAssert like this, need a proper report
-    # doAssert didSucceed, fmt"Fail({runId}): {r} - {s.value}"
-  
+  # XXX: this shouldn't be an doAssert like this, need a proper report
+  doAssert result.isSuccessful, $result
+
   # XXX: if we made it this far assume it worked
   # return true
 
@@ -493,8 +493,8 @@ proc assertProperty*[A, B, C](
     if not didSucceed:
       result.recordFailure(s.value, r)
 
-    # XXX: this shouldn't be an doAssert like this, need a proper report
-    # doAssert didSucceed, fmt"Fail({runId}): {r} - {s.value}"
+  # XXX: this shouldn't be an doAssert like this, need a proper report
+  doAssert result.isSuccessful, $result
   
   # XXX: if we made it this far assume it worked
   # return true
@@ -520,14 +520,6 @@ when isMainModule:
                 of false: ptFail
     var arb = uint32Arb(min, max)
     echo assertProperty(fmt"uint32 within the range[{min}, {max}]", arb, foo)
-
-  block:
-    let foo = proc(t: ((uint32, uint32))): PTStatus =
-                let (a, b) = t
-                case a + b > a
-                of true: ptPass
-                of false: ptFail
-    echo assertProperty("classic math assumption should fail", uint32Arb(), uint32Arb(), foo)
   
   block:
     let foo = proc(c: char): PTStatus =
@@ -554,6 +546,15 @@ when isMainModule:
     echo assertProperty(
       "strings - concatenation - len is >= the sum of the len of the parts",
       stringArb(), stringArb(), foo)
+  
+  block:
+    # test failure at the end because the assert exits early
+    let foo = proc(t: ((uint32, uint32))): PTStatus =
+                let (a, b) = t
+                case a + b > a
+                of true: ptPass
+                of false: ptFail
+    echo assertProperty("classic math assumption should fail", uint32Arb(), uint32Arb(), foo)
 
 #-- Macro approach, need to revisit
 
