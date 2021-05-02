@@ -4,7 +4,7 @@ import std/mersenne
 import std/options # need this for counter examples
 
 # these modules have limited use, so be selective
-from std/math import floor, log10
+from std/math import floor, log10, clamp
 from std/strformat import fmt
 from std/strutils import join, repeat
 from std/sugar import `=>` # XXX: maybe a bust because inference can't keep up
@@ -109,6 +109,8 @@ type
     ## random number generator, allows abstraction over algorithm
     seed: uint32
     rng: MersenneTwister
+    calls: uint          ## number of calls
+
   
   ArbitraryKind = enum
     akLarge,     ## infeasilbe to generate all possible values (most cases)
@@ -119,8 +121,8 @@ type
     ## XXX: eventually migrate to concepts once they're more stable, but
     ##      language stability is the big reason for making this whole property
     ##      based testing framework. :D
-    kind: ArbitraryKind # XXX: setup support for exhaustive kinds
     mgenerate: proc(a: Arbitrary[T], mrng: var Random): Shrinkable[T]
+    kind: ArbitraryKind # XXX: setup support for exhaustive kinds
 
   Shrinkable*[T] = object
     ## future support for shrinking
@@ -185,20 +187,22 @@ proc generate*[T](a: Arbitrary[T], mrng: var Random): Shrinkable[T] =
 proc map*[T,U](o: Arbitrary[T], mapper: proc(t: T): U): Arbitrary[U] =
   ## creates a new Arbitrary with mapped values
   ## XXX: constraining U by T isn't possible right now, need to fix generics
+  var orig = o
   let
     mgenerate = proc(a: Arbitrary[U], mrng: var Random): Shrinkable[U] =
-                  result = o.generate(mrng).map(mapper)
+                  result = orig.generate(mrng).map(mapper)
 
   return Arbitrary[U](mgenerate: mgenerate)
 
-proc filter*[T](a: Arbitrary[T], predicate: proc(t: T): bool): Arbitrary[T] =
+proc filter*[T](o: Arbitrary[T], predicate: proc(t: T): bool): Arbitrary[T] =
   ## creates a new Arbitrary with filtered values, aggressive filters can lead
   ## to exhausted values.
+  var orig = o
   let
-    mgenerate = proc(o: Arbitrary[T], mrng: Random): Shrinkable[T] =
-                  var g = o.generate(mrng)
+    mgenerate = proc(a: Arbitrary[T], mrng: var Random): Shrinkable[T] =
+                  var g = a.generate(mrng)
                   while not g.filter(predicate):
-                    g = o.generate(mrng)
+                    g = a.generate(mrng)
                   result = g
 
   return Arbitrary[T](mgenerate: mgenerate)
@@ -206,60 +210,27 @@ proc filter*[T](a: Arbitrary[T], predicate: proc(t: T): bool): Arbitrary[T] =
 proc flatMap[T, U](s: Arbitrary[T], fmapper: proc(t: T): Arbitrary[U]): Arbitrary[U] =
   ## creates a new Arbitrary for every value when you want to make the value
   ## of an Arbitrary depend upon the value of another.
+  var orig = s
   let
     mgenerate = proc(a: Arbitrary[U], mrng: var Random): Shrinkable[U] =
-                  result = fmapper(s.generate(mrng).value).generate(mrng)
+                  result = fmapper(orig.generate(mrng).value).generate(mrng)
   return Arbitrary[U](mgenerate: mgenerate)
 
-proc take*[T](a: Arbitrary[T], n: uint, mrng: Random): Shrinkable[seq[T]] =
+proc take*[T](a: Arbitrary[T], n: uint, mrng: var Random): Shrinkable[seq[T]] =
   ## generates a sequence of values meant to be used collectively
-  var r = mrng
+  var rng = mrng
   result = shrinkableOf(newSeqOfCap[T](n))
-  result.value.apply((_) => a.generate(r).value)
+  for i in 0..<n:
+    result.value.add a.generate(rng).value
+  mrng = rng
 
 proc sample*[T](a: Arbitrary[T], n: uint, mrng: var Random): seq[Shrinkable[T]] =
   ## generate a sequence of values meant to be used individually
-  result = shrinkableOf(newSeqOfCap[T](n))
-  result.value.apply((_) => a.generate(mrng))
-
-#-- Property
-
-converter toPTStatus(b: bool): PTStatus =
-  ## yes, they're evil, but in this case they're incredibly helpful
-  ## XXX: does this need to be exported?
-  if b: ptPass else: ptFail
-
-proc newProperty*[T](arb: Arbitrary[T], p: Predicate): Property[T] =
-  result = Property[T](arb: arb, predicate: p)
-
-proc withBias[T](arb: Arbitrary[T], f: Frequency): Arbitrary[T] =
-  ## create an arbitrary with bias
-  ## XXX: implement biasing, 
-  return arb
-
-proc generateAux[T](p: Property[T], mrng: var Random,
-                    r: PossibleRunId): Shrinkable[T] =
-  result =
-    if r.isUnspecified():
-      p.arb.generate(mrng)
-    else:
-      p.arb.withBias(runIdToFrequency(r)).generate(mrng)
-
-proc generate*[T](p: Property[T], mrng: var Random, runId: RunId): Shrinkable[T] =
-  return generateAux(p, mrng, runId)
-
-proc generate*[T](p: Property[T], mrng: var Random): Shrinkable[T] =
-  return generateAux(p, mrng, noRunId)
-
-proc run*[T](p: Property[T], v: T): PTStatus =
-  try:
-    result = p.predicate(v)
-  except:
-    # XXX: do some exception related checking here, for now pass through
-    raise getCurrentException()
-  finally:
-    # XXX: for hooks
-    discard
+  var rng = mrng
+  result = newSeqOfCap[Shrinkable[T]](n)
+  for i in 0..<n:
+    result.add a.generate(rng)
+  mrng = rng
 
 #-- Random Number Generation
 # XXX: the trick with rngs is that the number of calls to them matter, so we'll
@@ -272,10 +243,58 @@ proc newRandom(seed: uint32 = 0): Random =
   Random(seed: seed, rng: newMersenneTwister(seed))
 
 proc nextUint32(r: var Random): uint32 =
+  inc r.calls
   result = r.rng.getNum()
 
 proc nextInt(r: var Random): int =
+  inc r.calls
   result = cast[int32](r.rng.getNum())
+
+#-- Property
+
+converter toPTStatus(b: bool): PTStatus =
+  ## yes, they're evil, but in this case they're incredibly helpful
+  ## XXX: does this need to be exported?
+  if b: ptPass else: ptFail
+
+proc newProperty*[T](arb: Arbitrary[T], p: Predicate): Property[T] =
+  result = Property[T](arb: arb, predicate: p)
+
+proc withBias[T](arb: var Arbitrary[T], f: Frequency): var Arbitrary[T] =
+  ## create an arbitrary with bias
+  ## XXX: implement biasing
+  return arb
+
+proc toss(mrng: var Random) {.inline.} =
+  ## skips 42 numbers to introduce noise between generate calls
+  for _ in 0..41:
+    discard mrng.nextInt()
+
+proc generateAux[T](p: var Property[T], rng: Random,
+                    r: PossibleRunId): Shrinkable[T] =
+  var mrng = rng
+  toss(mrng)
+  result =
+    if r.isUnspecified():
+      p.arb.generate(mrng)
+    else:
+      p.arb.withBias(runIdToFrequency(r)).generate(mrng)
+
+proc generate*[T](p: var Property[T], mrng: Random, runId: RunId): Shrinkable[T] =
+  return generateAux(p, mrng, runId)
+
+proc generate*[T](p: Property[T], mrng: Random): Shrinkable[T] =
+  return generateAux(p, mrng, noRunId)
+
+proc run*[T](p: Property[T], v: T): PTStatus =
+  try:
+    result = p.predicate(v)
+  except:
+    # XXX: do some exception related checking here, for now pass through
+    raise getCurrentException()
+  finally:
+    # XXX: for hooks
+    discard
 
 #-- Property Test Status
 
@@ -297,10 +316,13 @@ proc tupleArb*[A](a1: Arbitrary[A]): Arbitrary[(A,)] =
 
 proc tupleArb*[A,B](a1: Arbitrary[A], a2: Arbitrary[B]): Arbitrary[(A,B)] =
   ## Arbitrary of pair tuple
+  var
+    o1 = a1
+    o2 = a2
   result = Arbitrary[(A,B)](
     mgenerate: proc(a: Arbitrary[(A,B)], rng: var Random): Shrinkable[(A,B)] =
                   shrinkableOf(
-                    (a1.generate(rng).value, a2.generate(rng).value)
+                    (o1.generate(rng).value, o2.generate(rng).value)
                   )
   )
 
@@ -308,6 +330,16 @@ proc intArb*(): Arbitrary[int] =
   result = Arbitrary[int](
     mgenerate: proc(arb: Arbitrary[int], rng: var Random): Shrinkable[int] =
                   shrinkableOf(rng.nextInt())
+  )
+
+proc intArb*(min, max: int): Arbitrary[int] =
+  ## create a int arbitrary with values in the range of min and max which are
+  ## inclusive.
+  assert min < max, "max must be greater than min"
+  let size = abs(max - min)
+  result = Arbitrary[int](
+    mgenerate: proc(arb: Arbitrary[int], rng: var Random): Shrinkable[int] =
+                  shrinkableOf(min + abs(rng.nextInt() mod size))
   )
 
 proc uint32Arb*(): Arbitrary[uint32] =
@@ -328,7 +360,7 @@ proc uint32Arb*(min, max: uint32): Arbitrary[uint32] =
 
 proc charArb*(): Arbitrary[char] =
   ## create a char arbitrary
-  result = uint32Arb(0, 255).map((i) => chr(cast[range[0 .. 255]](i)))
+  result = uint32Arb(0, 255).map(proc(i: uint32): char = chr(cast[range[0 .. 255]](i)))
 
 proc seqArbOf*[T](a: Arbitrary[T], min: uint32 = 0, max: uint32 = 100): Arbitrary[seq[T]] =
   ## create a sequence of varying size of some type
@@ -342,6 +374,34 @@ proc stringArb*(min: uint32 = 0, max: uint32 = 1000): Arbitrary[string] =
           mgenerate: proc(a: Arbitrary[string], mrng: var Random): Shrinkable[string] =
             charArb().take(size, mrng).map((cs) => cs.join()))
     )
+
+proc swapAccess[T](s: var openArray[T], a, b: int): T =
+  ## swap the value at position `a` for position `b`, then return the new value
+  ## at position `a`.
+  result = s[b]
+
+  if a != b:      # only need to swap if they're different
+    s[b] = s[a]
+    s[a] = result
+
+proc enumArb*[T: enum](): Arbitrary[T] =
+  # XXX: use a uint32 arb to get a value between the current pos and end of seq, then swap access over that
+  var
+    vals = toSeq(T.low..T.high)
+    pos: int = 0
+  result = Arbitrary[T](
+    kind: akExhaustive,
+    mgenerate: proc(arb: Arbitrary[T], rng: var Random): Shrinkable[T] =
+                  let
+                    endPos = max(0, vals.len - 1)
+                    atEnd = pos == endPos
+                    swapPos = if atEnd: endPos
+                              else: intArb(pos, endPos).generate(rng).value
+                  result = shrinkableOf(vals.swapAccess(pos, swapPos))
+                  inc pos
+                  if pos == endPos:
+                    pos = 0
+  )
 
 #-- Assert Property Reporting
 
@@ -524,34 +584,6 @@ proc execProperty*[A, B, C](
   else:
     ctx.reportSuccess($result)
 
-proc execProperty*[A, B, C](
-  name: string,
-  arb1: Arbitrary[A], arb2: Arbitrary[B], arb3: Arbitrary[C],
-  pred: Predicate[(A, B, C)],
-  params: AssertParams = defAssertPropParams()): AssertReport[(A,B,C)] =
-  ## run a property
-  result = startReport[(A, B, C)](name)
-  var
-    rng = params.random # XXX: need a var version
-    arb = tupleArb[A,B,C](arb1, arb2, arb3)
-    p = newProperty(arb, pred)
-  
-  while(result.runId < params.runsBeforeSuccess):
-    result.startRun()
-    let
-      s: Shrinkable[(A,B,C)] = p.generate(rng, result.runId)
-      r = p.run(s.value)
-      didSucceed = r notin {ptFail, ptPreCondFail}
-    
-    if not didSucceed:
-      result.recordFailure(s.value, r)
-
-  # XXX: this shouldn't be an doAssert like this, need a proper report
-  doAssert result.isSuccessful, $result
-  
-  # XXX: if we made it this far assume it worked
-  # return true
-
 #-- API
 
 proc name(ctx: GlobalContext): string =
@@ -612,20 +644,27 @@ template spec*(n: string = "", body: untyped): untyped =
 #-- Hackish Tests
 
 when isMainModule:
+  from macros import NimNodeKind
+  from times import toUnix, getTime
+
   spec "nim":
     spec "uint32":
-      block:
-        forAll("are >= 0, yes it's silly ", uint32Arb(),
-               proc(i: uint32): PTStatus = i >= 0)
+      forAll("are >= 0, yes it's silly ", uint32Arb(),
+             proc(i: uint32): PTStatus = i >= 0)
 
-      block:
-        let
-          min: uint32 = 100000000
-          max = high(uint32)
-        forAll(fmt"within the range[{min}, {max}]", uint32Arb(min, max),
-               proc(i: uint32): PTStatus = i >= min and i <= max)
+      let
+        min: uint32 = 100000000
+        max = high(uint32)
+      forAll(fmt"within the range[{min}, {max}]", uint32Arb(min, max),
+             proc(i: uint32): PTStatus = i >= min and i <= max)
 
-  
+    spec "enums":
+      forAll("are typically ordinals", enumArb[NimNodeKind](),
+             proc(n: NimNodeKind): PTStatus =
+               n > NimNodeKind.low  or n == NimNodeKind.low or
+               n < NimNodeKind.high or n == NimNodeKind.high
+            )
+
     spec "characters":
       spec "are ordinals":
         forAll("forming a bijection with int values between 0..255 (inclusive)",
@@ -652,6 +691,12 @@ when isMainModule:
              proc(ss: (string, string)): PTStatus =
                let (a, b) = ss
                a.len + b.len <= (a & b).len)
+  
+    when false:
+      # XXX: Use this for debugging
+      var rnd = newRandom(cast[uint32](clamp(toUnix(getTime()), 0'i64, uint32.high.int64)))
+      for i in enumArb().sample(10, rnd):
+        echo i.value
 
   # block:
     # XXX: this tests the failure branch but isn't running right now
@@ -665,69 +710,70 @@ when isMainModule:
 
 #-- Macro approach, need to revisit
 
-# XXX: need to make these work
-# proc initArbitrary[T: tuple]: Arbitrary[T] =
-#   # Temporary procedure we need to figure out how to make for *all* types
-#   let size = 100u32
-#   result = Arbitrary[T](
-#     mgenerate: proc(arb: Arbitrary[T], rng: var Random): Shrinkable[T] =
-#       var a = default T
-#       for field in a.fields:
-#         field = type(field)(rng.nextUint32() mod size)
-#   )
+when false:
+  # XXX: need to make these work, they move into the library part
+  proc initArbitrary[T: tuple]: Arbitrary[T] =
+    # Temporary procedure we need to figure out how to make for *all* types
+    let size = 100u32
+    result = Arbitrary[T](
+      mgenerate: proc(arb: Arbitrary[T], rng: var Random): Shrinkable[T] =
+        var a = default T
+        for field in a.fields:
+          field = type(field)(rng.nextUint32() mod size)
+    )
 
-# macro execProperty*(name: string, values: varargs[typed],
-#                       params = defAssertPropParams(), body: untyped): untyped =
-#   ## Generates and runs a property. Currently this auto-generates parameter
-#   ## names from a to z based on the tuple width -- 26 parameters is good enough
-#   ## for now.
-#   # XXX: do we want to make the parameter naming explicit?
-#   var tupleTyp = nnkTupleConstr.newTree()
-#   let
-#     isTuple = values.kind == nnkBracket and values[0].kind == nnkTupleConstr
-#     values = if isTuple: values[0] else: values
-#     possibleIdents = {'a'..'z'}.toSeq
-#     idents = block: # Generate the tuple, and the name unpack varaibles
-#       var
-#         idents: seq[NimNode]
-#       for i, x in values:
-#         let retT = x[0].getImpl[3][0][1]
-#         idents.add ident($possibleIdents[i])
-#         tupleTyp.add retT
-#       idents
+  macro execProperty*(name: string, values: varargs[typed],
+                        params = defAssertPropParams(), body: untyped): untyped =
+    ## Generates and runs a property. Currently this auto-generates parameter
+    ## names from a to z based on the tuple width -- 26 parameters is good enough
+    ## for now.
+    # XXX: do we want to make the parameter naming explicit?
+    var tupleTyp = nnkTupleConstr.newTree()
+    let
+      isTuple = values.kind == nnkBracket and values[0].kind == nnkTupleConstr
+      values = if isTuple: values[0] else: values
+      possibleIdents = {'a'..'z'}.toSeq
+      idents = block: # Generate the tuple, and the name unpack varaibles
+        var
+          idents: seq[NimNode]
+        for i, x in values:
+          let retT = x[0].getImpl[3][0][1]
+          idents.add ident($possibleIdents[i])
+          tupleTyp.add retT
+        idents
 
-#   # make the `let (a, b ...) = input`
-#   let unpackNode = nnkLetSection.newTree(nnkVarTuple.newTree(idents))  
-#   unpackNode[0].add newEmptyNode(), ident"input"
-  
-#   body.insert 0, unpackNode # add unpacking to the first step
+    # make the `let (a, b ...) = input`
+    let unpackNode = nnkLetSection.newTree(nnkVarTuple.newTree(idents))  
+    unpackNode[0].add newEmptyNode(), ident"input"
+    
+    body.insert 0, unpackNode # add unpacking to the first step
 
-#   result = newStmtList()
-#   result.add newProc(ident"test",
-#                      [
-#                        ident"PTStatus",
-#                        newIdentDefs(ident"input", tupleTyp, newEmptyNode())
-#                      ],
-#                      body) # Emit the proc
-#   result.add quote do:
-#     var
-#       arb = initArbitrary[`tupleTyp`]()
-#       report = startReport[`tupleTyp`](`name`)
-#       rng = `params`.random
-#       p = newProperty(arb, test)
-#     while report.runId < `params`.runsBeforeSuccess:
-#       report.startRun()
-#       let
-#         s: Shrinkable[`tupleTyp`] = p.generate(rng, report.runId)
-#         r: PTStatus = p.run(s.value)
-#         didSucceed = r notin {ptFail, ptPreCondFail}
-      
-#       if not didSucceed:
-#         report.recordFailure(s.value, r)
-  
-#     # XXX: useful for debugging the macro code
-#     # echo result.repr
+    result = newStmtList()
+    result.add newProc(ident"test",
+                      [
+                        ident"PTStatus",
+                        newIdentDefs(ident"input", tupleTyp, newEmptyNode())
+                      ],
+                      body) # Emit the proc
+    result.add quote do:
+      var
+        arb = initArbitrary[`tupleTyp`]()
+        report = startReport[`tupleTyp`](`name`)
+        rng = `params`.random
+        p = newProperty(arb, test)
+      while report.runId < `params`.runsBeforeSuccess:
+        report.startRun()
+        let
+          s: Shrinkable[`tupleTyp`] = p.generate(rng, report.runId)
+          r: PTStatus = p.run(s.value)
+          didSucceed = r notin {ptFail, ptPreCondFail}
+        
+        if not didSucceed:
+          report.recordFailure(s.value, r)
+    
+      # XXX: useful for debugging the macro code
+      # echo result.repr
 
-#     echo report
-#     if report.hasFailure:
-#       doAssert report.isSuccessful, $report
+      echo report
+      if report.hasFailure:
+        doAssert report.isSuccessful, $report
