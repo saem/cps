@@ -110,11 +110,16 @@ type
     seed: uint32
     rng: MersenneTwister
   
-  Arbitrary*[T] = object of RootObj
+  ArbitraryKind = enum
+    akLarge,     ## infeasilbe to generate all possible values (most cases)
+    akExhaustive ## possible to generate all values (bool, enums, 8 bit ints)
+
+  Arbitrary*[T] = object
     ## arbitrary value generator for some type T
     ## XXX: eventually migrate to concepts once they're more stable, but
     ##      language stability is the big reason for making this whole property
     ##      based testing framework. :D
+    kind: ArbitraryKind # XXX: setup support for exhaustive kinds
     mgenerate: proc(a: Arbitrary[T], mrng: var Random): Shrinkable[T]
 
   Shrinkable*[T] = object
@@ -564,39 +569,51 @@ template spec*(n: string = "", body: untyped): untyped =
   var globalCtx = GlobalContext(hasFailure: false,
                                 specNames: if n.len > 0: @[n] else: @[])
 
-  template forAll*[A](
-      name: string = "",
-      arb1: Arbitrary[A],
-      pred: Predicate[(A, )] # XXX: move the predicate decl inline
-      ) =
-    discard execProperty(globalCtx, name, arb1, pred, defAssertPropParams())
-  
-  template forAll*[A,B](
-      name: string = "",
-      arb1: Arbitrary[A], arb2: Arbitrary[B],
-      pred: Predicate[(A, B)] # XXX: move the predicate decl inline
-      ) =
-    discard execProperty(globalCtx, name, arb1, arb2, pred, defAssertPropParams())
+  block:
+    template forAll[A](
+        name: string = "",
+        arb1: Arbitrary[A],
+        pred: Predicate[A] # XXX: move the predicate decl inline
+        ) =
+      discard execProperty(globalCtx, name, arb1, pred, defAssertPropParams())
+    
+    template forAll[A,B](
+        name: string = "",
+        arb1: Arbitrary[A], arb2: Arbitrary[B],
+        pred: Predicate[(A, B)] # XXX: move the predicate decl inline
+        ) =
+      discard execProperty(globalCtx, name, arb1, arb2, pred, defAssertPropParams())
+    
+    template forAll[A,B,C](
+        name: string = "",
+        arb1: Arbitrary[A], arb2: Arbitrary[B], arb3: Arbitrary[C],
+        pred: Predicate[(A, B, C)] # XXX: move the predicate decl inline
+        ) =
+      discard execProperty(globalCtx, name, arb1, arb2, arb3, pred, defAssertPropParams())
 
-  template nest(name: string = "", b: untyped): untyped =
-    # XXX: figure out how to shadow and rename this to `spec`
-    globalCtx.startInnerSpec(name)
-    block:
-      b
-    globalCtx.stopInnerSpec()
+    template spec(name: string = "", b: untyped): untyped =
+      globalCtx.startInnerSpec(name)
+      block:
+        b
+      globalCtx.stopInnerSpec()
 
-  if globalCtx.specNames.len > 0:
-    echo globalCtx.name, "\n"
+    if globalCtx.specNames.len > 0:
+      echo globalCtx.name, "\n"
 
-  body
+    body
 
-  quit(if globalCtx.hasFailure: QuitFailure else: QuitSuccess)
+  if globalCtx.hasFailure:
+    echo "Failed"
+    quit(QuitFailure)
+  else:
+    echo "Success"
+    quit(QuitSuccess)
 
 #-- Hackish Tests
 
 when isMainModule:
   spec "nim":
-    nest "uint32":
+    spec "uint32":
       block:
         let foo = proc(i: uint32): PTStatus =
                     case i >= 0
@@ -617,8 +634,8 @@ when isMainModule:
         forAll(fmt"within the range[{min}, {max}]", arb, foo)  
 
   
-    nest "characters":
-      nest "are ordinals":
+    spec "characters":
+      spec "are ordinals":
         # XXX: the need to put blocks here isn't great, handle with `foo` predicate clean-up
         block:
           let foo = proc(c: char): PTStatus =
@@ -639,7 +656,7 @@ when isMainModule:
           forAll("have successors and predecessors or are at the end range",
                 charArb().map(gen), foo)
     
-    nest "strings":
+    spec "strings":
       let foo = proc(ss: (string, string)): PTStatus =
         let (a, b) = ss
         a.len + b.len <= (a & b).len
