@@ -6,7 +6,7 @@ import std/options # need this for counter examples
 # these modules have limited use, so be selective
 from std/math import floor, log10
 from std/strformat import fmt
-from std/strutils import join
+from std/strutils import join, repeat
 from std/sugar import `=>` # XXX: maybe a bust because inference can't keep up
 from std/algorithm import sort
 from std/sequtils import toSeq, apply
@@ -343,7 +343,7 @@ proc stringArb*(min: uint32 = 0, max: uint32 = 1000): Arbitrary[string] =
 type
   RunExecution[T] = object
     ## result of run execution
-    # XXX: move to using this rather than open state in `assertProperty` procs
+    # XXX: move to using this rather than open state in `execProperty` procs
     # XXX: lots to do to finish this:
     #      * save necessary state for quick reproduction (path, etc)
     #      * support async and streaming (iterator? CPS? magical other thing?)
@@ -352,11 +352,15 @@ type
     seed: uint32
     counterExample: Option[T]
 
+  GlobalContext* = object
+    hasFailure: bool
+    specNames: seq[string]
+
   AssertReport*[T] = object
     ## result of a property assertion, with all runs information
     # XXX: don't need counter example and generic param here once
     #      `RunExecution` is being used.
-    name: string ## XXX: populate me 
+    name: string
     runId: PossibleRunId
     failures: uint32
     firstFailure: PossibleRunId
@@ -412,49 +416,66 @@ type
     runsBeforeSuccess*: range[1..high(int)]
 
 proc defAssertPropParams(): AssertParams =
-  ## default params used for an `assertProperty`
+  ## default params used for an `execProperty`
   let seed: uint32 = 1
   result = AssertParams(seed: seed, random: newRandom(seed),
                         runsBeforeSuccess: 1000)
 
-proc assertProperty*[T](name: string, arb: Arbitrary[T], pred: Predicate[T],
-                        params: AssertParams = defAssertPropParams()
-                       ): AssertReport[T] =
-  ## run a property
+proc indent(ctx: GlobalContext): string =
+  '\t'.repeat(max(ctx.specNames.len - 2, 0))
+
+proc ctxEcho(ctx: GlobalContext, msg: string) =
+  echo ctx.indent, msg
+
+proc reportSuccess(ctx: GlobalContext, msg: string) =
+  ## XXX: do better reporting
+  ctx.ctxEcho "- " & msg
+
+proc reportFailure(ctx: var GlobalContext, msg: string) =
+  ## XXX: do better reporting
+  ctx.hasFailure = true
+  ctx.ctxEcho "- " & msg
+
+proc execProperty*[A](
+  ctx: var GlobalContext,
+  name: string,
+  arb: Arbitrary[A],
+  pred: Predicate[A],
+  params: AssertParams = defAssertPropParams()): AssertReport[A] =
+
+  result = startReport[A](name)
   var
-    report = startReport[T](name)
-    rng = params.random # XXX: need a var version, but this might hurt replay
+    rng = params.random # XXX: need a var version
     p = newProperty(arb, pred)
-  
-  while(report.runId < params.runsBeforeSuccess):
-    report.startRun()
+
+  while(result.runId < params.runsBeforeSuccess):
+    result.startRun()
     let
-      s: Shrinkable[T] = p.generate(rng, report.runId)
-      r: PTStatus = p.run(s.value)
+      s: Shrinkable[A] = p.generate(rng, result.runId)
+      r = p.run(s.value)
       didSucceed = r notin {ptFail, ptPreCondFail}
     
     if not didSucceed:
-      report.recordFailure(s.value, r)
+      result.recordFailure(s.value, r)
   
-  result = report
-  # XXX: this shouldn't be an doAssert like this, need a proper report
-  doAssert result.isSuccessful, $result
-  
-  # XXX: if we made it this far assume it worked
-  # return true
+  if result.hasFailure:
+    ctx.reportFailure($result)
+  else:
+    ctx.reportSuccess($result)
 
-proc assertProperty*[A, B](
+proc execProperty*[A, B](
+  ctx: var GlobalContext,
   name: string,
   arb1: Arbitrary[A], arb2: Arbitrary[B],
   pred: Predicate[(A, B)],
   params: AssertParams = defAssertPropParams()): AssertReport[(A,B)] =
-  ## run a property
+
   result = startReport[(A, B)](name)
   var
     rng = params.random # XXX: need a var version
     arb = tupleArb[A,B](arb1, arb2)
     p = newProperty(arb, pred)
-  
+
   while(result.runId < params.runsBeforeSuccess):
     result.startRun()
     let
@@ -464,14 +485,41 @@ proc assertProperty*[A, B](
     
     if not didSucceed:
       result.recordFailure(s.value, r)
+  
+  if result.hasFailure:
+    ctx.reportFailure($result)
+  else:
+    ctx.reportSuccess($result)
 
-  # XXX: this shouldn't be an doAssert like this, need a proper report
-  doAssert result.isSuccessful, $result
+proc execProperty*[A, B, C](
+  ctx: var GlobalContext,
+  name: string,
+  arb1: Arbitrary[A], arb2: Arbitrary[B], arb3: Arbitrary[C],
+  pred: Predicate[(A, B, C)],
+  params: AssertParams = defAssertPropParams()): AssertReport[(A,B,C)] =
 
-  # XXX: if we made it this far assume it worked
-  # return true
+  result = startReport[(A, B, C)](name)
+  var
+    rng = params.random # XXX: need a var version
+    arb = tupleArb[A,B,C](arb1, arb2, arb3)
+    p = newProperty(arb, pred)
 
-proc assertProperty*[A, B, C](
+  while(result.runId < params.runsBeforeSuccess):
+    result.startRun()
+    let
+      s: Shrinkable[(A,B,C)] = p.generate(rng, result.runId)
+      r = p.run(s.value)
+      didSucceed = r notin {ptFail, ptPreCondFail}
+    
+    if not didSucceed:
+      result.recordFailure(s.value, r)
+  
+  if result.hasFailure:
+    ctx.reportFailure($result)
+  else:
+    ctx.reportSuccess($result)
+
+proc execProperty*[A, B, C](
   name: string,
   arb1: Arbitrary[A], arb2: Arbitrary[B], arb3: Arbitrary[C],
   pred: Predicate[(A, B, C)],
@@ -499,62 +547,115 @@ proc assertProperty*[A, B, C](
   # XXX: if we made it this far assume it worked
   # return true
 
+#-- API
+
+proc name(ctx: GlobalContext): string =
+  if ctx.specNames.len > 0: ctx.specNames[0] else: ""
+
+proc startInnerSpec(ctx: var GlobalContext, name: string) =
+  ctx.specNames.add(name)
+  ctx.ctxEcho name
+
+proc stopInnerSpec(ctx: var GlobalContext) =
+  discard ctx.specNames.pop
+  echo "" # empty line to break up the spec
+
+template spec*(n: string = "", body: untyped): untyped =
+  var globalCtx = GlobalContext(hasFailure: false,
+                                specNames: if n.len > 0: @[n] else: @[])
+
+  template forAll*[A](
+      name: string = "",
+      arb1: Arbitrary[A],
+      pred: Predicate[(A, )] # XXX: move the predicate decl inline
+      ) =
+    discard execProperty(globalCtx, name, arb1, pred, defAssertPropParams())
+  
+  template forAll*[A,B](
+      name: string = "",
+      arb1: Arbitrary[A], arb2: Arbitrary[B],
+      pred: Predicate[(A, B)] # XXX: move the predicate decl inline
+      ) =
+    discard execProperty(globalCtx, name, arb1, arb2, pred, defAssertPropParams())
+
+  template nest(name: string = "", b: untyped): untyped =
+    # XXX: figure out how to shadow and rename this to `spec`
+    globalCtx.startInnerSpec(name)
+    block:
+      b
+    globalCtx.stopInnerSpec()
+
+  if globalCtx.specNames.len > 0:
+    echo globalCtx.name, "\n"
+
+  body
+
+  quit(if globalCtx.hasFailure: QuitFailure else: QuitSuccess)
+
 #-- Hackish Tests
 
 when isMainModule:
-  block:
-    let foo = proc(i: uint32): PTStatus =
-                case i >= 0
-                of true: ptPass
-                of false: ptFail
-    var arb = uint32Arb()
-    echo assertProperty("uint32 are >= 0, yes it's silly ", arb, foo)
+  spec "nim":
+    nest "uint32":
+      block:
+        let foo = proc(i: uint32): PTStatus =
+                    case i >= 0
+                    of true: ptPass
+                    of false: ptFail
+        var arb = uint32Arb()
+        forAll("are >= 0, yes it's silly ", arb, foo)
 
-  block:
-    let
-      min: uint32 = 100000000
-      max = high(uint32)
-    let foo = proc(i: uint32): PTStatus =
-                case i >= min
-                of true: ptPass
-                of false: ptFail
-    var arb = uint32Arb(min, max)
-    echo assertProperty(fmt"uint32 within the range[{min}, {max}]", arb, foo)
-  
-  block:
-    let foo = proc(c: char): PTStatus =
-      c == chr(ord(c)) and ord(c) >= 0 and ord(c) <= 255
-    echo assertProperty("characters are oridinals - have corresponding int values", charArb(), foo)
+      block:
+        let
+          min: uint32 = 100000000
+          max = high(uint32)
+        let foo = proc(i: uint32): PTStatus =
+                    case i >= min and i <= max
+                    of true: ptPass
+                    of false: ptFail
+        var arb = uint32Arb(min, max)
+        forAll(fmt"within the range[{min}, {max}]", arb, foo)  
 
-  block:
-    let gen = proc(c: char): (char, char, char) =
-      let
-        prev = if c == low(char): c else: pred(c)
-        curr = c
-        next = if c == high(char): c else: succ(c)
-      (prev, curr, next)
-    let foo = proc(cs: (char, char, char)): PTStatus =
-      let (a, b, c) = cs
-      (a < b and b < c) or (a <= b and b < c) or (a < b and b <= c)
-    echo """characters are ordinals - have successors and predecessors or
-            are at the end range""".assertProperty(charArb().map(gen), foo)
   
-  block:
-    let foo = proc(ss: (string, string)): PTStatus =
-      let (a, b) = ss
-      a.len + b.len <= (a & b).len
-    echo assertProperty(
-      "strings - concatenation - len is >= the sum of the len of the parts",
-      stringArb(), stringArb(), foo)
-  
-  block:
+    nest "characters":
+      nest "are ordinals":
+        # XXX: the need to put blocks here isn't great, handle with `foo` predicate clean-up
+        block:
+          let foo = proc(c: char): PTStatus =
+            c == chr(ord(c)) and ord(c) >= 0 and ord(c) <= 255
+          forAll("forming a bijection with int values between 0..255 (inclusive)",
+                 charArb(), foo)
+
+        block:
+          let gen = proc(c: char): (char, char, char) =
+            let
+              prev = if c == low(char): c else: pred(c)
+              curr = c
+              next = if c == high(char): c else: succ(c)
+            (prev, curr, next)
+          let foo = proc(cs: (char, char, char)): PTStatus =
+            let (a, b, c) = cs
+            (a < b and b < c) or (a <= b and b < c) or (a < b and b <= c)
+          forAll("have successors and predecessors or are at the end range",
+                charArb().map(gen), foo)
+    
+    nest "strings":
+      let foo = proc(ss: (string, string)): PTStatus =
+        let (a, b) = ss
+        a.len + b.len <= (a & b).len
+      forAll("concatenation - len is >= the sum of the len of the parts",
+        stringArb(), stringArb()):
+          foo
+
+  # block:
+    # XXX: this tests the failure branch but isn't running right now
     # test failure at the end because the assert exits early
-    let foo = proc(t: ((uint32, uint32))): PTStatus =
-                let (a, b) = t
-                case a + b > a
-                of true: ptPass
-                of false: ptFail
-    echo assertProperty("classic math assumption should fail", uint32Arb(), uint32Arb(), foo)
+    # let foo = proc(t: ((uint32, uint32))): PTStatus =
+    #             let (a, b) = t
+    #             case a + b > a
+    #             of true: ptPass
+    #             of false: ptFail
+    # forAll("classic math assumption should fail", uint32Arb(), uint32Arb(), foo)
 
 #-- Macro approach, need to revisit
 
@@ -569,7 +670,7 @@ when isMainModule:
 #         field = type(field)(rng.nextUint32() mod size)
 #   )
 
-# macro assertProperty*(name: string, values: varargs[typed],
+# macro execProperty*(name: string, values: varargs[typed],
 #                       params = defAssertPropParams(), body: untyped): untyped =
 #   ## Generates and runs a property. Currently this auto-generates parameter
 #   ## names from a to z based on the tuple width -- 26 parameters is good enough
