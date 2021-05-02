@@ -615,33 +615,23 @@ when isMainModule:
   spec "nim":
     spec "uint32":
       block:
-        let foo = proc(i: uint32): PTStatus =
-                    case i >= 0
-                    of true: ptPass
-                    of false: ptFail
-        var arb = uint32Arb()
-        forAll("are >= 0, yes it's silly ", arb, foo)
+        forAll("are >= 0, yes it's silly ", uint32Arb(),
+               proc(i: uint32): PTStatus = i >= 0)
 
       block:
         let
           min: uint32 = 100000000
           max = high(uint32)
-        let foo = proc(i: uint32): PTStatus =
-                    case i >= min and i <= max
-                    of true: ptPass
-                    of false: ptFail
-        var arb = uint32Arb(min, max)
-        forAll(fmt"within the range[{min}, {max}]", arb, foo)  
+        forAll(fmt"within the range[{min}, {max}]", uint32Arb(min, max),
+               proc(i: uint32): PTStatus = i >= min and i <= max)
 
   
     spec "characters":
       spec "are ordinals":
-        # XXX: the need to put blocks here isn't great, handle with `foo` predicate clean-up
-        block:
-          let foo = proc(c: char): PTStatus =
-            c == chr(ord(c)) and ord(c) >= 0 and ord(c) <= 255
-          forAll("forming a bijection with int values between 0..255 (inclusive)",
-                 charArb(), foo)
+        forAll("forming a bijection with int values between 0..255 (inclusive)",
+               charArb(),
+               proc(c: char): PTStatus =
+                 c == chr(ord(c)) and ord(c) >= 0 and ord(c) <= 255)
 
         block:
           let gen = proc(c: char): (char, char, char) =
@@ -650,19 +640,18 @@ when isMainModule:
               curr = c
               next = if c == high(char): c else: succ(c)
             (prev, curr, next)
-          let foo = proc(cs: (char, char, char)): PTStatus =
-            let (a, b, c) = cs
-            (a < b and b < c) or (a <= b and b < c) or (a < b and b <= c)
           forAll("have successors and predecessors or are at the end range",
-                charArb().map(gen), foo)
+                 charArb().map(gen),
+                 proc(cs: (char, char, char)): PTStatus =
+                   let (a, b, c) = cs
+                   (a < b and b < c) or (a <= b and b < c) or (a < b and b <= c))
     
     spec "strings":
-      let foo = proc(ss: (string, string)): PTStatus =
-        let (a, b) = ss
-        a.len + b.len <= (a & b).len
       forAll("concatenation - len is >= the sum of the len of the parts",
-        stringArb(), stringArb()):
-          foo
+             stringArb(), stringArb(),
+             proc(ss: (string, string)): PTStatus =
+               let (a, b) = ss
+               a.len + b.len <= (a & b).len)
 
   # block:
     # XXX: this tests the failure branch but isn't running right now
