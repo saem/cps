@@ -250,6 +250,16 @@ proc nextInt(r: var Random): int =
   inc r.calls
   result = cast[int32](r.rng.getNum())
 
+proc nextUint32(r: var Random; min, max: uint32): uint32 =
+  assert min < max, "max must be greater than min"
+  let size = max - min
+  result = min + (r.nextUint32() mod size)
+
+proc nextInt(r: var Random; min, max: int): int =
+  assert min < max, "max must be greater than min"
+  let size = abs(max - min)
+  result = min + abs(r.nextInt() mod size)
+
 #-- Property
 
 converter toPTStatus(b: bool): PTStatus =
@@ -327,11 +337,9 @@ proc intArb*(): Arbitrary[int] =
 proc intArb*(min, max: int): Arbitrary[int] =
   ## create a int arbitrary with values in the range of min and max which are
   ## inclusive.
-  assert min < max, "max must be greater than min"
-  let size = abs(max - min)
   result = Arbitrary[int](
     mgenerate: proc(arb: Arbitrary[int], rng: var Random): Shrinkable[int] =
-                  shrinkableOf(min + abs(rng.nextInt() mod size))
+                  shrinkableOf(rng.nextInt(min, max))
   )
 
 proc uint32Arb*(): Arbitrary[uint32] =
@@ -343,38 +351,64 @@ proc uint32Arb*(): Arbitrary[uint32] =
 proc uint32Arb*(min, max: uint32): Arbitrary[uint32] =
   ## create a uint32 arbitrary with values in the range of min and max which
   ## are inclusive.
-  assert min < max, "max must be greater than min"
-  let size = max - min
   result = Arbitrary[uint32](
     mgenerate: proc(arb: Arbitrary[uint32], rng: var Random): Shrinkable[uint32] =
-                  shrinkableOf(min + (rng.nextUint32() mod size))
+                  shrinkableOf(rng.nextUint32(min, max))
   )
 
-proc charArb*(): Arbitrary[char] =
-  ## create a char arbitrary
-  result = uint32Arb(0, 255).map(proc(i: uint32): char = chr(cast[range[0 .. 255]](i)))
+proc swapAccess[T](s: var openArray[T], a, b: int): T =
+  ## swap the value at position `a` for position `b`, then return the new value
+  ## at position `a`. Used for exhaustive arbitrary traversal.
+  result = s[b]
+
+  if a != b:      # only need to swap if they're different
+    s[b] = s[a]
+    s[a] = result
+
+proc charArb*(min, max: char): Arbitrary[char] =
+  ## create a char arbitrary for a given range
+  var
+    vals = toSeq(min..max)
+    pos: int = 0
+  result = Arbitrary[char](
+    kind: akExhaustive,
+    mgenerate: proc(arb: Arbitrary[char], rng: var Random): Shrinkable[char] =
+                  let
+                    endPos = vals.len - 1
+                    atEnd = pos == endPos
+                    swapPos = if atEnd: endPos
+                              else: rng.nextInt(pos, endPos)
+                  result = shrinkableOf(vals.swapAccess(pos, swapPos))
+                  inc pos
+                  if pos == endPos:
+                    pos = 0
+  )
+
+proc charArb*(): Arbitrary[char] {.inline.} =
+  ## create a char arbitrary for the full character range, see: `charAsciiArb`
+  charArb(char.low, char.high)
+
+proc charAsciiArb*(): Arbitrary[char] {.inline.} =
+  ## create an ascii char arbitrary
+  charArb(char.low, chr(127))
 
 proc seqArbOf*[T](a: Arbitrary[T], min: uint32 = 0, max: uint32 = 100): Arbitrary[seq[T]] =
   ## create a sequence of varying size of some type
   assert min <= max
   result = uint32Arb(min, max).map((i) => a.take(i))
 
-proc stringArb*(min: uint32 = 0, max: uint32 = 1000): Arbitrary[string] =
-  result = uint32Arb(min, max).flatMap(
-      proc(size: uint32): Arbitrary[string] =
-        Arbitrary[string](
-          mgenerate: proc(a: Arbitrary[string], mrng: var Random): Shrinkable[string] =
-            charArb().take(size, mrng).map((cs) => cs.join()))
-    )
+proc stringArb*(min: uint32 = 0, max: uint32 = 1000, charArb = charArb()): Arbitrary[string] =
+  ## create strings using the full character range with len of `min` to `max`
+  ## see: `stringAsciiArb`
+  result = Arbitrary[string](
+    mgenerate: proc(a: Arbitrary[string], mrng: var Random): Shrinkable[string] =
+                 let size = mrng.nextUint32(min, max)
+                 charArb.take(size, mrng).map((cs) => cs.join())
+  )
 
-proc swapAccess[T](s: var openArray[T], a, b: int): T =
-  ## swap the value at position `a` for position `b`, then return the new value
-  ## at position `a`.
-  result = s[b]
-
-  if a != b:      # only need to swap if they're different
-    s[b] = s[a]
-    s[a] = result
+proc stringAsciiArb*(min: uint32 = 0, max: uint32 = 1000): Arbitrary[string] {.inline.} =
+  ## create strings using the ascii character range with len of `min` to `max`
+  stringArb(min, max, charAsciiArb())
 
 proc enumArb*[T: enum](): Arbitrary[T] =
   # XXX: use a uint32 arb to get a value between the current pos and end of seq, then swap access over that
@@ -388,7 +422,7 @@ proc enumArb*[T: enum](): Arbitrary[T] =
                     endPos = max(0, vals.len - 1)
                     atEnd = pos == endPos
                     swapPos = if atEnd: endPos
-                              else: intArb(pos, endPos).generate(rng).value
+                              else: rng.nextInt(pos, endPos)
                   result = shrinkableOf(vals.swapAccess(pos, swapPos))
                   inc pos
                   if pos == endPos:
@@ -681,7 +715,11 @@ when isMainModule:
                  proc(cs: (char, char, char)): PTStatus =
                    let (a, b, c) = cs
                    (a < b and b < c) or (a <= b and b < c) or (a < b and b <= c))
-    
+      forAll("ascii - are from 0 to 127",
+             charAsciiArb(),
+             proc(c: char): PTStatus =
+               c.ord >= 0 or c.ord <= 127)
+
     spec "strings":
       forAll("concatenation - len is >= the sum of the len of the parts",
              stringArb(), stringArb(),
