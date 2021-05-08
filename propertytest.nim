@@ -429,6 +429,10 @@ proc enumArb*[T: enum](): Arbitrary[T] =
                     pos = 0
   )
 
+proc nimNodeArb*(): Arbitrary[NimNode] =
+  # XXX: what is even going on?
+  result = enumArb[NimNodeKind]().map(k => newNimNode(k))
+
 #-- Assert Property Reporting
 
 type
@@ -446,6 +450,8 @@ type
   GlobalContext* = object
     hasFailure: bool
     specNames: seq[string]
+    # compileTime: bool      ## are we executing the property at compile time
+    # ctOutput: string       ## the output generated
 
   AssertReport*[T] = object
     ## result of a property assertion, with all runs information
@@ -508,7 +514,12 @@ type
     runsBeforeSuccess*: range[1..high(int)]
 
 proc timeToUint32(): uint32 {.inline.} =
-  cast[uint32](clamp(toUnix(getTime()), 0'i64, uint32.high.int64))
+  when nimvm:
+    # XXX: can't access time in the VM, figure out another way
+    0
+  else:
+    cast[uint32](clamp(toUnix(getTime()), 0'i64, uint32.high.int64))
+  
 
 proc defAssertPropParams(): AssertParams =
   ## default params used for an `execProperty`
@@ -627,23 +638,20 @@ proc stopInnerSpec(ctx: var GlobalContext) =
   discard ctx.specNames.pop
   echo "" # empty line to break up the spec
 
-template spec*(n: string = "", body: untyped): untyped =
-  var globalCtx = GlobalContext(hasFailure: false,
-                                specNames: if n.len > 0: @[n] else: @[])
-
+template specAux(globalCtx: var GlobalContext, body: untyped): untyped =
   block:
     template forAll[A](
         name: string = "",
         arb1: Arbitrary[A],
         pred: Predicate[A] # XXX: move the predicate decl inline
-        ) =
+        ) {.hint[XDeclaredButNotUsed]: off.} =
       discard execProperty(globalCtx, name, arb1, pred, defAssertPropParams())
     
     template forAll[A,B](
         name: string = "",
         arb1: Arbitrary[A], arb2: Arbitrary[B],
         pred: Predicate[(A, B)] # XXX: move the predicate decl inline
-        ) =
+        ) {.hint[XDeclaredButNotUsed]: off.} =
       discard execProperty(globalCtx, name, arb1, arb2, pred,
                            defAssertPropParams())
     
@@ -651,9 +659,12 @@ template spec*(n: string = "", body: untyped): untyped =
         name: string = "",
         arb1: Arbitrary[A], arb2: Arbitrary[B], arb3: Arbitrary[C],
         pred: Predicate[(A, B, C)] # XXX: move the predicate decl inline
-        ) =
+        ) {.hint[XDeclaredButNotUsed]: off.} =
       discard execProperty(globalCtx, name, arb1, arb2, arb3, pred,
                            defAssertPropParams())
+
+    template ctSpec(name: string = "", b: untyped): untyped {.hint[XDeclaredButNotUsed]: off.} =
+      {.error: "ctSpec can only be used once at the top level".}
 
     template spec(name: string = "", b: untyped): untyped =
       globalCtx.startInnerSpec(name)
@@ -665,6 +676,12 @@ template spec*(n: string = "", body: untyped): untyped =
       echo globalCtx.name, "\n"
 
     body
+    globalCtx
+
+template spec*(n: string = "", body: untyped): untyped =
+  var globalCtx = GlobalContext(hasFailure: false,
+                                specNames: if n.len > 0: @[n] else: @[])
+  discard specAux(globalCtx, body)
 
   if globalCtx.hasFailure:
     echo "Failed"
@@ -672,6 +689,18 @@ template spec*(n: string = "", body: untyped): untyped =
   else:
     echo "Success"
     quit(QuitSuccess)
+
+macro ctSpec*(n: string = "", body: untyped): untyped =
+  quote do:
+    const ctx = block:
+      let
+        n = `n`
+        name = if n.len == 0: "" else: " " & n
+      var globalCtx = GlobalContext(hasFailure: false,
+                        specNames: if n.len > 0: @[n] else: @[])
+      specAux(globalCtx, `body`)
+    when ctx.hasFailure:
+      {.error: fmt"Compile time spec{name} failed".}
 
 #-- Hackish Tests
 
@@ -727,6 +756,11 @@ when isMainModule:
                let (a, b) = ss
                a.len + b.len <= (a & b).len)
   
+  ctSpec "NimNode":
+    forAll("generate NimNodes for no good reason",
+            nimNodeArb(),
+            proc(n: NimNode): PTStatus = true)
+
     when false:
       # XXX: Use this for debugging
       var rnd = newRandom(cast[uint32](clamp(toUnix(getTime()), 0'i64, uint32.high.int64)))
