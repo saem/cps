@@ -8,8 +8,8 @@ from std/math import floor, log10, clamp
 from std/strformat import fmt
 from std/strutils import join, repeat
 from std/sugar import `=>` # XXX: maybe a bust because inference can't keep up
-from std/algorithm import sort
 from std/sequtils import toSeq, apply
+from std/times import toUnix, getTime
 
 # XXX: Once this is mature enough (repeatability, shrinking, and API) move out
 #      of experimental.
@@ -110,7 +110,6 @@ type
     seed: uint32
     rng: MersenneTwister
     calls: uint          ## number of calls
-
   
   ArbitraryKind = enum
     akLarge,     ## infeasilbe to generate all possible values (most cases)
@@ -207,9 +206,10 @@ proc filter*[T](o: Arbitrary[T], predicate: proc(t: T): bool): Arbitrary[T] =
 
   return Arbitrary[T](mgenerate: mgenerate)
 
-proc flatMap[T, U](s: Arbitrary[T], fmapper: proc(t: T): Arbitrary[U]): Arbitrary[U] =
-  ## creates a new Arbitrary for every value when you want to make the value
-  ## of an Arbitrary depend upon the value of another.
+proc flatMap[T, U](s: Arbitrary[T],
+                   fmapper: proc(t: T): Arbitrary[U]): Arbitrary[U] =
+  ## creates a new Arbitrary for every value produced by `s`. For when you want
+  ## to make the value of an Arbitrary depend upon the value of another.
   var orig = s
   let
     mgenerate = proc(a: Arbitrary[U], mrng: var Random): Shrinkable[U] =
@@ -295,14 +295,6 @@ proc run*[T](p: Property[T], v: T): PTStatus =
   finally:
     # XXX: for hooks
     discard
-
-#-- Property Test Status
-
-proc `and`(a, b: PTStatus): PTStatus =
-  ## XXX: this probably shouldn't be boo
-  var status = [a, b]
-  status.sort()
-  result = status[0]
 
 #-- Basic Arbitraries
 # these are so you can actually test a thing
@@ -430,6 +422,7 @@ type
     failures: uint32
     firstFailure: PossibleRunId
     failureType: PTStatus
+    seed: uint32
     counterExample: Option[T]
 
 proc startRun[T](r: var AssertReport[T]) {.inline.} =
@@ -458,15 +451,15 @@ proc `$`*[T](r: AssertReport[T]): string =
   # XXX: make this less ugly
   let status =
     if r.hasFailure:
-      fmt"failures: {r.failures}, firstFailure: {r.firstFailure}, firstFailureType: {r.failureType}, counter-example: {r.counterExample}"
+      fmt"failures: {r.failures}, firstFailure: {r.firstFailure}, firstFailureType: {r.failureType}, counter-example: {r.counterExample}, seed: {r.seed}"
     else:
       "status: success"
 
   result = fmt"{r.name} - {status}, totalRuns: {r.runId.int}"
 
-proc startReport[T](name: string): AssertReport[T] =
+proc startReport[T](name: string, seed: uint32): AssertReport[T] =
   ## start a new report
-  result = AssertReport[T](name: name, runId: noRunId, failures: 0,
+  result = AssertReport[T](name: name, runId: noRunId, failures: 0, seed: seed,
                         firstFailure: noRunId, counterExample: none[T]())
 
 #-- Assert Properties
@@ -480,9 +473,12 @@ type
     random*: Random
     runsBeforeSuccess*: range[1..high(int)]
 
+proc timeToUint32(): uint32 {.inline.} =
+  cast[uint32](clamp(toUnix(getTime()), 0'i64, uint32.high.int64))
+
 proc defAssertPropParams(): AssertParams =
   ## default params used for an `execProperty`
-  let seed: uint32 = 1
+  let seed: uint32 = timeToUint32()
   result = AssertParams(seed: seed, random: newRandom(seed),
                         runsBeforeSuccess: 1000)
 
@@ -508,7 +504,7 @@ proc execProperty*[A](
   pred: Predicate[A],
   params: AssertParams = defAssertPropParams()): AssertReport[A] =
 
-  result = startReport[A](name)
+  result = startReport[A](name, params.seed)
   var
     rng = params.random # XXX: need a var version
     p = newProperty(arb, pred)
@@ -535,7 +531,7 @@ proc execProperty*[A, B](
   pred: Predicate[(A, B)],
   params: AssertParams = defAssertPropParams()): AssertReport[(A,B)] =
 
-  result = startReport[(A, B)](name)
+  result = startReport[(A, B)](name, params.seed)
   var
     rng = params.random # XXX: need a var version
     arb = tupleArb[A,B](arb1, arb2)
@@ -563,7 +559,7 @@ proc execProperty*[A, B, C](
   pred: Predicate[(A, B, C)],
   params: AssertParams = defAssertPropParams()): AssertReport[(A,B,C)] =
 
-  result = startReport[(A, B, C)](name)
+  result = startReport[(A, B, C)](name, params.seed)
   var
     rng = params.random # XXX: need a var version
     arb = tupleArb[A,B,C](arb1, arb2, arb3)
@@ -614,14 +610,16 @@ template spec*(n: string = "", body: untyped): untyped =
         arb1: Arbitrary[A], arb2: Arbitrary[B],
         pred: Predicate[(A, B)] # XXX: move the predicate decl inline
         ) =
-      discard execProperty(globalCtx, name, arb1, arb2, pred, defAssertPropParams())
+      discard execProperty(globalCtx, name, arb1, arb2, pred,
+                           defAssertPropParams())
     
     template forAll[A,B,C](
         name: string = "",
         arb1: Arbitrary[A], arb2: Arbitrary[B], arb3: Arbitrary[C],
         pred: Predicate[(A, B, C)] # XXX: move the predicate decl inline
         ) =
-      discard execProperty(globalCtx, name, arb1, arb2, arb3, pred, defAssertPropParams())
+      discard execProperty(globalCtx, name, arb1, arb2, arb3, pred,
+                           defAssertPropParams())
 
     template spec(name: string = "", b: untyped): untyped =
       globalCtx.startInnerSpec(name)
@@ -645,7 +643,6 @@ template spec*(n: string = "", body: untyped): untyped =
 
 when isMainModule:
   from macros import NimNodeKind
-  from times import toUnix, getTime
 
   spec "nim":
     spec "uint32":
