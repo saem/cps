@@ -15,6 +15,7 @@ from std/times import toUnix, getTime
 #      of experimental.
 
 ## :Author: Saem Ghani
+## :License: MIT License
 ##
 ## Current Development:
 ## ====================
