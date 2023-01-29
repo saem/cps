@@ -2,7 +2,8 @@ import std/macros except newStmtList, newTree
 
 import cps/[spec, normalizedast]
 
-{.experimental: "dynamicBindSym".}
+when false:
+  {.experimental: "dynamicBindSym".}
 
 ##[
 

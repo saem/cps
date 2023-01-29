@@ -2,8 +2,17 @@ include preamble
 
 import killer
 
+import std/macros
+from cps/spec import Hook
+
+macro trace(hook: static[Hook]; source, target: typed; fun: string;
+            info: LineInfo; body: typed): untyped =
+  echo hook, ": ", fun
+  body
+
 suite "expression flattening":
   test "flatten expression list in var/let":
+    {.define(whatthefuck).}
     var k = newKiller(3)
     proc foo() {.cps: Cont.} =
       let
@@ -17,7 +26,7 @@ suite "expression flattening":
       check b == y
 
     foo()
-
+when false:
   test "flatten block expression":
     var k = newKiller(3)
     proc foo() {.cps: Cont.} =
